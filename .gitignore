@@ -1,0 +1,12 @@
+node_modules/
+dist/
+release/
+artifacts/
+assets/icon.png
+assets/icon.ico
+.env.local
+.env.production.local
+*.log
+test-results/
+playwright-report/
+ui-home.png

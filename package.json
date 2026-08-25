@@ -1,0 +1,65 @@
+{
+  "name": "tela-entre-amigos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Compartilhamento de tela P2P em alta qualidade para pequenos grupos.",
+  "main": "electron/main.cjs",
+  "author": "Greg Preto",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:5173 && electron .\"",
+    "build:icon": "node scripts/generate-icon.mjs",
+    "typecheck": "tsc --noEmit",
+    "test:ui": "playwright test",
+    "build:web": "vite build",
+    "build": "npm run build:icon && npm run typecheck && npm run build:web && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "trystero": "^0.25.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "@playwright/test": "^1.58.2",
+    "concurrently": "^9.1.2",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.0.12",
+    "png-to-ico": "^3.0.1",
+    "sharp": "^0.35.3",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.gregpreto.tela",
+    "productName": "Tela",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "Tela-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Tela"
+    }
+  }
+}
