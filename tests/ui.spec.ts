@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const mockDesktop = async (page: Page) => {
-  await page.addInitScript(() => {
+const mockDesktop = async (page: Page, initialUpdateStatus?: UpdateStatus) => {
+  await page.addInitScript((updateStatus) => {
     const thumbnail =
       "data:image/svg+xml," +
       encodeURIComponent(
@@ -10,7 +10,7 @@ const mockDesktop = async (page: Page) => {
 
     Object.defineProperty(window, "telaDesktop", {
       value: {
-        getVersion: async () => "0.1.1-test",
+        getVersion: async () => "0.2.0-test",
         getSources: async () => [
           {
             id: "screen:1:0",
@@ -25,6 +25,16 @@ const mockDesktop = async (page: Page) => {
         copyText: async (value: string) => {
           sessionStorage.setItem("copied-room-code", value);
           return true;
+        },
+        getTurnServers: async () => [],
+        checkForUpdates: async () => ({ state: "development" }),
+        installUpdate: async () => {
+          sessionStorage.setItem("update-installed", "true");
+          return true;
+        },
+        onUpdateStatus: (callback: (status: UpdateStatus) => void) => {
+          if (updateStatus) setTimeout(() => callback(updateStatus), 0);
+          return () => undefined;
         },
       },
     });
@@ -44,7 +54,7 @@ const mockDesktop = async (page: Page) => {
         return canvas.captureStream(10);
       },
     });
-  });
+  }, initialUpdateStatus);
 };
 
 test("carrega a tela inicial e abre a configuração do anfitrião", async ({ page }) => {
@@ -83,6 +93,15 @@ test("copia o código da sala usando a ponte nativa", async ({ page }) => {
 
   await expect(page.getByRole("button", { name: /Copiado/i })).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem("copied-room-code"))).toBe(code);
+});
+
+test("oferece reinício quando uma atualização automática termina", async ({ page }) => {
+  await mockDesktop(page, { state: "downloaded", version: "0.2.1" });
+  await page.goto("/");
+
+  await expect(page.getByText("Versão 0.2.1 pronta")).toBeVisible();
+  await page.getByRole("button", { name: "Reiniciar agora" }).click();
+  expect(await page.evaluate(() => sessionStorage.getItem("update-installed"))).toBe("true");
 });
 
 test("dois clientes se encontram pela descoberta P2P pública", async ({ page, context }) => {

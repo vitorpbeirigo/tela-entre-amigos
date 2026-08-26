@@ -18,6 +18,8 @@ O anfitrião escolhe entre 1080p a 30 FPS, 1080p a 60 FPS e 1440p a 60 FPS. A qu
 - Electron + React para captura e interface.
 - WebRTC para mídia direta entre os computadores.
 - Trystero com relays públicos Nostr e MQTT em paralelo para descoberta redundante dos computadores.
+- Fallback TURN carregado por configuração remota quando a conexão direta é bloqueada.
+- Atualizações automáticas distribuídas por GitHub Releases.
 - Sem banco de dados e sem armazenamento de mídia.
 
 ## Desenvolvimento
@@ -33,7 +35,7 @@ npm.cmd run dev
 npm.cmd run build
 ```
 
-O instalador será gerado em `artifacts/Tela-Setup-0.1.1.exe`. A pasta é ignorada pelo Git; publique o arquivo em uma GitHub Release ou envie diretamente aos seus amigos.
+O instalador será gerado em `artifacts/Tela-Setup-0.2.0.exe`, junto de `latest.yml` e do arquivo `.blockmap` usados pelo atualizador. A pasta é ignorada pelo Git; publique esses arquivos em uma GitHub Release.
 
 ## Publicar no GitHub
 
@@ -42,18 +44,24 @@ O workflow incluído compila o instalador em uma máquina Windows do GitHub:
 ```powershell
 git remote add origin URL_DO_SEU_REPOSITORIO
 git push -u origin main
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 Ao enviar uma tag `v*`, o GitHub Actions cria uma Release com o instalador anexado. Também é possível executar **Build Windows installer** manualmente na aba Actions para baixar o instalador como artefato.
+
+A versão `0.2.0` é a última que os amigos precisam baixar manualmente. Depois dela, o Tela verifica Releases, baixa novas versões em segundo plano e mostra o botão **Reiniciar agora** quando a atualização estiver pronta.
+
+## Ativar o fallback TURN
+
+O arquivo `network.json` é consultado em cada sessão. Defina `turnCredentialsUrl` com um endpoint HTTPS que devolva `{ "iceServers": [...] }`. O endpoint deve gerar credenciais temporárias e manter a chave administrativa do provedor apenas no servidor. Alterar esse arquivo no GitHub ativa ou troca o TURN sem recompilar o aplicativo.
 
 ## Privacidade e custo
 
 - O vídeo e o áudio trafegam diretamente entre os computadores por WebRTC e são criptografados em trânsito.
 - Relays públicos Nostr e MQTT são usados somente para os participantes se encontrarem e negociarem a conexão.
 - O aplicativo não grava nem armazena a transmissão.
-- Não há custo fixo de servidor nesta versão.
+- A conexão direta continua sem custo. TURN só transporta mídia quando a rede direta falha e consome a franquia do provedor.
 - O código da sala funciona como senha: compartilhe apenas com quem deve entrar e crie uma nova sala a cada sessão.
 
 ## Limite conhecido do MVP

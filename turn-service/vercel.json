@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/turn.mjs": {
+      "maxDuration": 10
+    }
+  }
+}

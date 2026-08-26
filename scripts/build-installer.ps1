@@ -34,4 +34,10 @@ if (-not $installer) {
 $destination = Join-Path $artifactOutput $installer.Name
 Copy-Item -LiteralPath $installer.FullName -Destination $destination -Force
 
+Get-ChildItem -LiteralPath $buildOutput -File |
+  Where-Object { $_.Name -eq 'latest.yml' -or $_.Name -like 'Tela-Setup-*.blockmap' } |
+  ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $artifactOutput $_.Name) -Force
+  }
+
 Write-Output "Instalador pronto: $destination"

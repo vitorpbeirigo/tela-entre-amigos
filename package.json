@@ -1,6 +1,6 @@
 {
   "name": "tela-entre-amigos",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Compartilhamento de tela P2P em alta qualidade para pequenos grupos.",
   "main": "electron/main.cjs",
@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@trystero-p2p/mqtt": "^0.25.3",
+    "electron-updater": "^6.8.9",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -44,6 +45,13 @@
       "dist/**/*",
       "electron/**/*",
       "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "vitorpbeirigo",
+        "repo": "tela-entre-amigos"
+      }
     ],
     "win": {
       "icon": "assets/icon.ico",

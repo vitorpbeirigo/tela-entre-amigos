@@ -50,6 +50,12 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .topbar-status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; letter-spacing: .02em; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 4px rgba(121,224,154,.08); }
 .version { border-left: 1px solid var(--border); margin-left: 6px; padding-left: 14px; color: #62666d; }
+.update-notice { position: fixed; z-index: 20; right: 22px; bottom: 22px; width: min(410px, calc(100vw - 44px)); min-height: 70px; padding: 12px 12px 12px 14px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 11px; border: 1px solid var(--border-strong); border-radius: 10px; background: rgba(22,23,24,.97); box-shadow: 0 18px 52px rgba(0,0,0,.48); }
+.update-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; background: rgba(223,242,71,.1); color: var(--accent); }
+.update-notice strong, .update-notice small { display: block; }
+.update-notice strong { font-size: 12px; font-weight: 600; }
+.update-notice small { margin-top: 4px; color: var(--muted); font-size: 10px; }
+.update-notice .button { min-height: 36px; padding-inline: 12px; font-size: 11px; }
 
 .home-grid { min-height: calc(100vh - 68px); max-width: 1240px; margin: 0 auto; padding: 76px 56px 64px; display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 88px; }
 .hero-copy { max-width: 540px; }

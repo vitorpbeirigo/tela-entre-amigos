@@ -32,11 +32,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Tela-Windows
-          path: artifacts/Tela-Setup-*.exe
+          path: |
+            artifacts/Tela-Setup-*.exe
+            artifacts/Tela-Setup-*.blockmap
+            artifacts/latest.yml
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/Tela-Setup-*.exe
+          files: |
+            artifacts/Tela-Setup-*.exe
+            artifacts/Tela-Setup-*.blockmap
+            artifacts/latest.yml
           generate_release_notes: true

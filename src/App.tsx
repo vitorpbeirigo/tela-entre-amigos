@@ -4,6 +4,7 @@ import {
   ChevronRight,
   Clipboard,
   Copy,
+  Download,
   Expand,
   Headphones,
   Link2,
@@ -117,7 +118,8 @@ function App() {
   const [connectionState, setConnectionState] = useState("Preparando");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [version, setVersion] = useState("0.1.1");
+  const [version, setVersion] = useState("0.2.0");
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [stats, setStats] = useState<ConnectionStats>({
     bitrate: "—",
     resolution: "—",
@@ -143,6 +145,7 @@ function App() {
 
   useEffect(() => {
     window.telaDesktop?.getVersion().then(setVersion).catch(() => undefined);
+    return window.telaDesktop?.onUpdateStatus?.(setUpdateStatus);
   }, []);
 
   useEffect(() => {
@@ -170,12 +173,13 @@ function App() {
     }
   }, [quality]);
 
-  const joinP2PRoom = useCallback((role: Role, code: string, stream?: MediaStream) => {
+  const joinP2PRoom = useCallback((role: Role, code: string, turnConfig: TurnServerConfig[], stream?: MediaStream) => {
     const roomId = code.replaceAll("-", "");
     const roomConfig = {
       appId: TRYSTERO_APP_ID,
       password: roomId,
       relayConfig: { warnOnRelayFailure: true },
+      turnConfig,
     };
 
     const onJoinError = (strategy: string) => ({ error }: { error: string }) => {
@@ -266,7 +270,7 @@ function App() {
         const openRelays = sockets.filter((socket) => socket.readyState === WebSocket.OPEN).length;
         setConnectionState("Ainda procurando");
         setError(openRelays > 0
-          ? "A sala não respondeu. Confirme o código, mantenha o anfitrião transmitindo e verifique se os dois estão usando a versão 0.1.1."
+          ? "A sala não respondeu. Confirme o código, mantenha o anfitrião transmitindo e verifique se os dois estão usando a versão mais recente."
           : "Não foi possível acessar os serviços de sala. Verifique a internet ou o Firewall do Windows e tente novamente.");
       }, CONNECTION_TIMEOUT_MS);
     }
@@ -318,6 +322,7 @@ function App() {
     setConnectionState("Abrindo a tela");
 
     try {
+      const turnServersPromise = window.telaDesktop.getTurnServers().catch(() => []);
       await window.telaDesktop.selectSource(selectedSourceId, withSystemAudio);
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
@@ -335,12 +340,13 @@ function App() {
       }
 
       const code = generateRoomCode();
+      const turnServers = await turnServersPromise;
       localStreamRef.current = stream;
       setLocalStream(stream);
       setRoomCode(code);
       setView("host-live");
-      setConnectionState("Sala aberta");
-      joinP2PRoom("host", code, stream);
+      setConnectionState(turnServers.length ? "Sala aberta · TURN pronto" : "Sala aberta");
+      joinP2PRoom("host", code, turnServers, stream);
     } catch (startError) {
       cleanup();
       setView("host-setup");
@@ -357,10 +363,12 @@ function App() {
 
     setError("");
     setRoomCode(code);
-    setConnectionState("Procurando a sala");
+    setConnectionState("Preparando as rotas");
     setView("viewer-live");
     try {
-      joinP2PRoom("viewer", code);
+      const turnServers = await window.telaDesktop.getTurnServers().catch(() => []);
+      setConnectionState("Procurando a sala");
+      joinP2PRoom("viewer", code, turnServers);
     } catch (joinError) {
       cleanup();
       setView("viewer-join");
@@ -439,6 +447,21 @@ function App() {
           <span className="version">v{version}</span>
         </div>
       </header>
+
+      {updateStatus && ["available", "downloading", "downloaded"].includes(updateStatus.state) && (
+        <div className="update-notice" role="status">
+          <span className="update-icon"><Download size={16} /></span>
+          <span>
+            <strong>{updateStatus.state === "downloaded" ? `Versão ${updateStatus.version} pronta` : "Baixando atualização"}</strong>
+            <small>{updateStatus.state === "downloading" ? `${updateStatus.percent ?? 0}% concluído` : "O Tela se mantém atualizado automaticamente."}</small>
+          </span>
+          {updateStatus.state === "downloaded" && (
+            <button className="button button-primary" onClick={() => void window.telaDesktop.installUpdate()}>
+              Reiniciar agora
+            </button>
+          )}
+        </div>
+      )}
 
       {view === "home" && (
         <section className="home-grid page-enter">
