@@ -2,8 +2,19 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("telaDesktop", {
   getSources: () => ipcRenderer.invoke("capture:get-sources"),
-  selectSource: (sourceId, withSystemAudio) =>
-    ipcRenderer.invoke("capture:select-source", { sourceId, withSystemAudio }),
+  selectSource: (sourceId) => ipcRenderer.invoke("capture:select-source", { sourceId }),
+  startDiscordFilteredAudio: () => ipcRenderer.invoke("audio:start-discord-filtered"),
+  stopDiscordFilteredAudio: () => ipcRenderer.invoke("audio:stop-discord-filtered"),
+  onAudioPcm: (callback) => {
+    const listener = (_event, chunk) => callback(chunk);
+    ipcRenderer.on("audio:pcm", listener);
+    return () => ipcRenderer.removeListener("audio:pcm", listener);
+  },
+  onAudioStatus: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("audio:status", listener);
+    return () => ipcRenderer.removeListener("audio:status", listener);
+  },
   getVersion: () => ipcRenderer.invoke("app:get-version"),
   getPlatform: () => ipcRenderer.invoke("app:get-platform"),
   getCapturePermission: () => ipcRenderer.invoke("capture:get-permission"),

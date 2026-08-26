@@ -21,10 +21,19 @@ interface UpdateStatus {
   percent?: number;
 }
 
+interface FilteredAudioStatus {
+  state: "ready" | "error";
+  discordExcluded?: boolean;
+}
+
 interface Window {
   telaDesktop: {
     getSources(): Promise<CaptureSource[]>;
-    selectSource(sourceId: string, withSystemAudio: boolean): Promise<boolean>;
+    selectSource(sourceId: string): Promise<boolean>;
+    startDiscordFilteredAudio(): Promise<{ discordExcluded: boolean }>;
+    stopDiscordFilteredAudio(): Promise<boolean>;
+    onAudioPcm(callback: (chunk: Uint8Array) => void): () => void;
+    onAudioStatus(callback: (status: FilteredAudioStatus) => void): () => void;
     getVersion(): Promise<string>;
     getPlatform(): Promise<NodeJS.Platform>;
     getCapturePermission(): Promise<"not-determined" | "granted" | "denied" | "restricted" | "unknown">;

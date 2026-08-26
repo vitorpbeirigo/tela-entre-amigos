@@ -31,6 +31,11 @@ test("o aplicativo Electron lista fontes reais e inicia a captura", async () => 
 
     await window.getByRole("button", { name: /Iniciar transmissão/i }).click();
     await expect(window.getByRole("heading", { name: /Sua tela está sendo compartilhada/i })).toBeVisible({ timeout: 15_000 });
+    await expect.poll(async () =>
+      window.locator(".video-panel video").evaluate((video: HTMLVideoElement) =>
+        (video.srcObject as MediaStream | null)?.getAudioTracks().length ?? 0,
+      ),
+    ).toBe(1);
     await expect(window.locator(".room-code-copy")).toContainText(/^[A-Z2-9-]{23}$/);
     const code = (await window.locator(".room-code-copy span").textContent())!.trim();
     await window.getByRole("button", { name: /Copiar código/i }).click();

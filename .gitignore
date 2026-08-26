@@ -9,4 +9,6 @@ assets/icon.ico
 *.log
 test-results/
 playwright-report/
+native/bin/
+native/audio-capture/x64/
 ui-home.png

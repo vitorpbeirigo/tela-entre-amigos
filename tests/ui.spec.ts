@@ -33,6 +33,10 @@ const mockDesktop = async (
           },
         ],
         selectSource: async () => true,
+        startDiscordFilteredAudio: async () => ({ discordExcluded: true }),
+        stopDiscordFilteredAudio: async () => true,
+        onAudioPcm: () => () => undefined,
+        onAudioStatus: () => () => undefined,
         copyText: async (value: string) => {
           sessionStorage.setItem("copied-room-code", value);
           return true;
@@ -81,6 +85,8 @@ test("carrega a tela inicial e abre a configuração do anfitrião", async ({ pa
   await expect(page.getByText("Tela principal", { exact: true })).toBeVisible();
   await expect(page.locator(".source-card").first()).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("radio", { name: /Cinema/i })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByText("Áudio sem Discord", { exact: true })).toBeVisible();
+  await expect(page.getByRole("switch")).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Iniciar transmissão/i })).toBeEnabled();
   expect(errors).toEqual([]);
 });

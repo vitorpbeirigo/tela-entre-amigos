@@ -87,6 +87,54 @@ const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const TRYSTERO_APP_ID = "com.gregpreto.tela.p2p.v1";
 const CONNECTION_TIMEOUT_MS = 20_000;
 const PARTICLE_COLORS = ["#8052ff", "#ffb829", "#15846e", "#b96cff", "#5d8dff", "#ff5caa"];
+const FILTERED_AUDIO_WORKLET = `
+class TelaPcmQueueProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.queue = [];
+    this.offset = 0;
+    this.queuedSamples = 0;
+    this.port.onmessage = ({ data }) => {
+      if (!(data instanceof Float32Array) || data.length === 0) return;
+      if (this.queuedSamples > 384000) {
+        this.queue = [];
+        this.offset = 0;
+        this.queuedSamples = 0;
+      }
+      this.queue.push(data);
+      this.queuedSamples += data.length;
+    };
+  }
+
+  process(_inputs, outputs) {
+    const output = outputs[0];
+    if (!output || output.length < 2) return true;
+    const left = output[0];
+    const right = output[1];
+    let outputFrame = 0;
+
+    while (outputFrame < left.length && this.queue.length > 0) {
+      const samples = this.queue[0];
+      const availableFrames = Math.floor((samples.length - this.offset) / 2);
+      const framesToCopy = Math.min(left.length - outputFrame, availableFrames);
+      for (let frame = 0; frame < framesToCopy; frame += 1) {
+        const sampleIndex = this.offset + frame * 2;
+        left[outputFrame + frame] = samples[sampleIndex];
+        right[outputFrame + frame] = samples[sampleIndex + 1];
+      }
+      outputFrame += framesToCopy;
+      this.offset += framesToCopy * 2;
+      this.queuedSamples -= framesToCopy * 2;
+      if (this.offset >= samples.length) {
+        this.queue.shift();
+        this.offset = 0;
+      }
+    }
+    return true;
+  }
+}
+registerProcessor("tela-pcm-queue", TelaPcmQueueProcessor);
+`;
 
 function seededValue(index: number, salt: number) {
   const value = Math.sin(index * 12.9898 + salt * 78.233) * 43758.5453;
@@ -145,7 +193,6 @@ function App() {
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [selectedSourceId, setSelectedSourceId] = useState<string>("");
   const [qualityKey, setQualityKey] = useState<QualityKey>("cinema");
-  const [withSystemAudio, setWithSystemAudio] = useState(true);
   const [roomCode, setRoomCode] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -154,7 +201,7 @@ function App() {
   const [connectionState, setConnectionState] = useState("Preparando");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [version, setVersion] = useState("0.4.1");
+  const [version, setVersion] = useState("0.5.0");
   const [platform, setPlatform] = useState<NodeJS.Platform | "">("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [stats, setStats] = useState<ConnectionStats>({
@@ -174,6 +221,11 @@ function App() {
   const hostSessionRef = useRef<{ peerId: string; room: Room } | null>(null);
   const connectionErrorsRef = useRef(new Set<string>());
   const connectionTimeoutRef = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioWorkletRef = useRef<AudioWorkletNode | null>(null);
+  const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const audioPcmUnsubscribeRef = useRef<(() => void) | null>(null);
+  const audioStatusUnsubscribeRef = useRef<(() => void) | null>(null);
 
   const quality = useMemo(
     () => QUALITY_PRESETS.find((preset) => preset.key === qualityKey) ?? QUALITY_PRESETS[0],
@@ -193,6 +245,86 @@ function App() {
   useEffect(() => {
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
   }, [remoteStream, view]);
+
+  const stopFilteredAudio = useCallback(() => {
+    audioPcmUnsubscribeRef.current?.();
+    audioPcmUnsubscribeRef.current = null;
+    audioStatusUnsubscribeRef.current?.();
+    audioStatusUnsubscribeRef.current = null;
+    audioDestinationRef.current?.stream.getTracks().forEach((track) => track.stop());
+    audioDestinationRef.current = null;
+    audioWorkletRef.current?.disconnect();
+    audioWorkletRef.current = null;
+    const context = audioContextRef.current;
+    audioContextRef.current = null;
+    if (context && context.state !== "closed") void context.close();
+    void window.telaDesktop.stopDiscordFilteredAudio().catch(() => undefined);
+  }, []);
+
+  const createFilteredAudioTrack = useCallback(async () => {
+    if (platform !== "win32") {
+      throw new Error("O modo automático sem Discord está disponível apenas no Windows.");
+    }
+
+    const context = new AudioContext({ sampleRate: 48_000, latencyHint: "interactive" });
+    audioContextRef.current = context;
+    const moduleUrl = URL.createObjectURL(new Blob([FILTERED_AUDIO_WORKLET], { type: "text/javascript" }));
+    try {
+      await context.audioWorklet.addModule(moduleUrl);
+    } finally {
+      URL.revokeObjectURL(moduleUrl);
+    }
+
+    const worklet = new AudioWorkletNode(context, "tela-pcm-queue", {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+    });
+    const destination = context.createMediaStreamDestination();
+    worklet.connect(destination);
+    audioWorkletRef.current = worklet;
+    audioDestinationRef.current = destination;
+
+    let remainder = new Uint8Array(0);
+    audioPcmUnsubscribeRef.current = window.telaDesktop.onAudioPcm((chunk) => {
+      const incoming = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+      const bytes = remainder.length ? new Uint8Array(remainder.length + incoming.length) : incoming;
+      if (remainder.length) {
+        bytes.set(remainder);
+        bytes.set(incoming, remainder.length);
+      }
+      const usableBytes = bytes.length - (bytes.length % 4);
+      remainder = usableBytes < bytes.length ? bytes.slice(usableBytes) : new Uint8Array(0);
+      if (usableBytes === 0) return;
+
+      const view = new DataView(bytes.buffer, bytes.byteOffset, usableBytes);
+      const samples = new Float32Array(usableBytes / 2);
+      for (let index = 0; index < samples.length; index += 1) {
+        samples[index] = view.getInt16(index * 2, true) / 32_768;
+      }
+      worklet.port.postMessage(samples, [samples.buffer]);
+    });
+    audioStatusUnsubscribeRef.current = window.telaDesktop.onAudioStatus((status) => {
+      if (status.state === "error") {
+        setError("A captura de áudio foi interrompida. Encerre e inicie a transmissão novamente.");
+      }
+    });
+
+    try {
+      await window.telaDesktop.startDiscordFilteredAudio();
+      await context.resume();
+    } catch (audioError) {
+      stopFilteredAudio();
+      throw audioError;
+    }
+
+    const track = destination.stream.getAudioTracks()[0];
+    if (!track) {
+      stopFilteredAudio();
+      throw new Error("O Windows não criou a faixa de áudio da transmissão.");
+    }
+    return track;
+  }, [platform, stopFilteredAudio]);
 
   const configureVideoSender = useCallback(async (pc: RTCPeerConnection) => {
     const sender = pc.getSenders().find((item) => item.track?.kind === "video");
@@ -322,6 +454,7 @@ function App() {
     connectionErrorsRef.current.clear();
     if (connectionTimeoutRef.current !== null) window.clearTimeout(connectionTimeoutRef.current);
     connectionTimeoutRef.current = null;
+    stopFilteredAudio();
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     remoteStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
@@ -330,7 +463,7 @@ function App() {
     setRemoteStream(null);
     setViewerCount(0);
     setStats({ bitrate: "—", resolution: "—", fps: "—", latency: "—" });
-  }, []);
+  }, [stopFilteredAudio]);
 
   useEffect(() => cleanup, [cleanup]);
 
@@ -374,17 +507,22 @@ function App() {
     setError("");
     setConnectionState("Abrindo a tela");
 
+    let stream: MediaStream | null = null;
     try {
       const turnServersPromise = window.telaDesktop.getTurnServers().catch(() => []);
-      await window.telaDesktop.selectSource(selectedSourceId, withSystemAudio);
-      const stream = await navigator.mediaDevices.getDisplayMedia({
+      await window.telaDesktop.selectSource(selectedSourceId);
+      stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           width: { ideal: quality.width },
           height: { ideal: quality.height },
           frameRate: { ideal: quality.frameRate, max: quality.frameRate },
         },
-        audio: withSystemAudio,
+        audio: platform === "darwin",
       });
+      if (platform === "win32") {
+        const filteredAudioTrack = await createFilteredAudioTrack();
+        stream.addTrack(filteredAudioTrack);
+      }
 
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
@@ -401,6 +539,7 @@ function App() {
       setConnectionState(turnServers.length ? "Sala aberta · TURN pronto" : "Sala aberta");
       joinP2PRoom("host", code, turnServers, stream);
     } catch (startError) {
+      stream?.getTracks().forEach((track) => track.stop());
       cleanup();
       setView("host-setup");
       const permissionDenied = startError instanceof DOMException && startError.name === "NotAllowedError";
@@ -408,7 +547,7 @@ function App() {
         ? "O macOS não liberou a captura. Permita o Tela em Privacidade e Segurança > Gravação de Tela e Áudio do Sistema e abra o app novamente."
         : startError instanceof Error ? startError.message : "Não foi possível iniciar a transmissão.");
     }
-  }, [cleanup, joinP2PRoom, platform, quality, selectedSourceId, withSystemAudio]);
+  }, [cleanup, createFilteredAudioTrack, joinP2PRoom, platform, quality, selectedSourceId]);
 
   const joinRoom = useCallback(async () => {
     const code = normalizeRoomCode(joinCode);
@@ -627,14 +766,11 @@ function App() {
               <div className="panel compact-panel">
                 <div className="audio-row">
                   <span className="audio-icon"><Volume2 size={18} /></span>
-                  <span><strong>Áudio do computador</strong><small>Filmes, jogos e aplicativos</small></span>
-                  <button
-                    className={`switch ${withSystemAudio ? "on" : ""}`}
-                    onClick={() => setWithSystemAudio((value) => !value)}
-                    role="switch"
-                    aria-checked={withSystemAudio}
-                    aria-label="Transmitir áudio do computador"
-                  ><span /></button>
+                  <span>
+                    <strong>{platform === "win32" ? "Áudio sem Discord" : "Áudio do computador"}</strong>
+                    <small>{platform === "win32" ? "Jogos, navegadores e vídeos são transmitidos" : "Filmes, jogos e aplicativos"}</small>
+                  </span>
+                  <span className="audio-fixed"><ShieldCheck size={14} /> Automático</span>
                 </div>
               </div>
 
@@ -742,7 +878,7 @@ function App() {
               <span>{stats.resolution}</span><span>{stats.fps}</span><span>{stats.bitrate}</span><span>{stats.latency}</span>
             </div>
           </div>
-          <p className="headphone-note"><Headphones size={15} /> Use fones para evitar retorno de áudio durante a conversa.</p>
+          <p className="headphone-note"><Headphones size={15} /> {platform === "win32" ? "O áudio do Discord é removido automaticamente da transmissão." : "Use fones para evitar retorno durante a conversa."}</p>
         </section>
       )}
     </main>

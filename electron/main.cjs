@@ -1,12 +1,14 @@
 const { app, BrowserWindow, clipboard, desktopCapturer, ipcMain, session, shell, systemPreferences } = require("electron");
 const { autoUpdater } = require("electron-updater");
+const { spawn } = require("node:child_process");
+const fs = require("node:fs");
 const path = require("node:path");
 
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
 let mainWindow;
 let selectedSourceId = null;
-let captureSystemAudio = true;
+let audioCaptureProcess = null;
 let turnCache = { expiresAt: 0, servers: [] };
 
 const NETWORK_CONFIG_URL =
@@ -111,6 +113,94 @@ async function listCaptureSources() {
   }));
 }
 
+function getAudioCaptureExecutable() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "TelaAudioCapture.exe")
+    : path.join(__dirname, "..", "native", "bin", "TelaAudioCapture.exe");
+}
+
+function stopDiscordFilteredAudio() {
+  const child = audioCaptureProcess;
+  audioCaptureProcess = null;
+  if (child && !child.killed) child.kill();
+}
+
+function startDiscordFilteredAudio() {
+  if (process.platform !== "win32") {
+    throw new Error("A captura que exclui o Discord está disponível apenas no Windows.");
+  }
+
+  stopDiscordFilteredAudio();
+  const executable = getAudioCaptureExecutable();
+  if (!fs.existsSync(executable)) {
+    throw new Error("O componente de áudio do Tela não foi encontrado. Reinstale a versão mais recente.");
+  }
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, [], {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    audioCaptureProcess = child;
+    let ready = false;
+    let stderrBuffer = "";
+
+    const startupTimeout = setTimeout(() => {
+      if (ready) return;
+      stopDiscordFilteredAudio();
+      reject(new Error("O capturador de áudio do Windows não respondeu."));
+    }, 6_000);
+
+    child.stdout.on("data", (chunk) => {
+      if (child !== audioCaptureProcess || !mainWindow || mainWindow.isDestroyed()) return;
+      mainWindow.webContents.send("audio:pcm", new Uint8Array(chunk));
+    });
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderrBuffer += chunk;
+      const lines = stderrBuffer.split(/\r?\n/);
+      stderrBuffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const readyMatch = /^READY\s+(\d+)$/.exec(line.trim());
+        if (readyMatch) {
+          const discordPid = Number(readyMatch[1]);
+          if (!ready) {
+            ready = true;
+            clearTimeout(startupTimeout);
+            resolve({ discordExcluded: discordPid > 0 });
+          }
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("audio:status", {
+              state: "ready",
+              discordExcluded: discordPid > 0,
+            });
+          }
+        } else if (line.trim()) {
+          console.warn("Capturador de áudio:", line.trim());
+        }
+      }
+    });
+
+    child.once("error", (error) => {
+      clearTimeout(startupTimeout);
+      if (child === audioCaptureProcess) audioCaptureProcess = null;
+      if (!ready) reject(new Error(`Não foi possível abrir o áudio seletivo: ${error.message}`));
+    });
+
+    child.once("exit", (code) => {
+      clearTimeout(startupTimeout);
+      if (child === audioCaptureProcess) audioCaptureProcess = null;
+      if (!ready) {
+        reject(new Error(`O áudio seletivo foi encerrado antes de iniciar (código ${code ?? "desconhecido"}).`));
+      } else if (code && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("audio:status", { state: "error" });
+      }
+    });
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1180,
@@ -160,7 +250,7 @@ app.whenReady().then(() => {
 
       callback({
         video: source,
-        audio: captureSystemAudio ? "loopback" : undefined,
+        audio: process.platform === "darwin" ? "loopback" : undefined,
       });
     } catch (error) {
       console.error("Falha ao selecionar captura", error);
@@ -174,11 +264,19 @@ app.whenReady().then(() => {
   });
   ipcMain.handle("capture:select-source", (event, options) => {
     if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
-    if (typeof options?.sourceId !== "string" || typeof options?.withSystemAudio !== "boolean") {
+    if (typeof options?.sourceId !== "string") {
       throw new TypeError("Opções de captura inválidas");
     }
     selectedSourceId = options.sourceId;
-    captureSystemAudio = options.withSystemAudio;
+    return true;
+  });
+  ipcMain.handle("audio:start-discord-filtered", (event) => {
+    if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
+    return startDiscordFilteredAudio();
+  });
+  ipcMain.handle("audio:stop-discord-filtered", (event) => {
+    if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
+    stopDiscordFilteredAudio();
     return true;
   });
   ipcMain.handle("app:get-version", (event) => {
@@ -232,5 +330,8 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  stopDiscordFilteredAudio();
   if (process.platform !== "darwin") app.quit();
 });
+
+app.on("before-quit", stopDiscordFilteredAudio);

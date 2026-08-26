@@ -1,6 +1,6 @@
 {
   "name": "tela-entre-amigos",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "description": "Compartilhamento de tela P2P em alta qualidade para pequenos grupos.",
   "main": "electron/main.cjs",
@@ -8,11 +8,12 @@
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:5173 && electron .\"",
     "build:icon": "node scripts/generate-icon.mjs",
+    "build:native": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-audio-helper.ps1",
     "typecheck": "tsc --noEmit",
     "test:ui": "playwright test",
     "build:web": "vite build",
     "build:common": "npm run build:icon && npm run typecheck && npm run build:web",
-    "build:win": "npm run build:common && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
+    "build:win": "npm run build:native && npm run build:common && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
     "build:mac": "npm run build:common && electron-builder --mac dmg zip --x64 --arm64 --publish never",
     "build": "npm run build:win"
   },
@@ -59,6 +60,12 @@
     ],
     "win": {
       "icon": "assets/icon.ico",
+      "extraResources": [
+        {
+          "from": "native/bin/TelaAudioCapture.exe",
+          "to": "TelaAudioCapture.exe"
+        }
+      ],
       "target": [
         {
           "target": "nsis",
