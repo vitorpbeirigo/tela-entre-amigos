@@ -1,6 +1,6 @@
 {
   "name": "tela-entre-amigos",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Compartilhamento de tela P2P em alta qualidade para pequenos grupos.",
   "main": "electron/main.cjs",
@@ -71,7 +71,8 @@
     "mac": {
       "icon": "assets/icon.png",
       "category": "public.app-category.utilities",
-      "identity": null,
+      "identity": "-",
+      "hardenedRuntime": false,
       "target": [
         {
           "target": "dmg",

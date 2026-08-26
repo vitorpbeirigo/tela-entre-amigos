@@ -15,7 +15,7 @@ const mockDesktop = async (
 
     Object.defineProperty(window, "telaDesktop", {
       value: {
-        getVersion: async () => "0.3.0-test",
+        getVersion: async () => "0.3.1-test",
         getPlatform: async () => desktopPlatform,
         getCapturePermission: async () => permission,
         openCaptureSettings: async () => {
