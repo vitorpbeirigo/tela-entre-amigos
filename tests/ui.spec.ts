@@ -10,7 +10,7 @@ const mockDesktop = async (page: Page) => {
 
     Object.defineProperty(window, "telaDesktop", {
       value: {
-        getVersion: async () => "0.1.0-test",
+        getVersion: async () => "0.1.1-test",
         getSources: async () => [
           {
             id: "screen:1:0",
@@ -22,6 +22,10 @@ const mockDesktop = async (page: Page) => {
           },
         ],
         selectSource: async () => true,
+        copyText: async (value: string) => {
+          sessionStorage.setItem("copied-room-code", value);
+          return true;
+        },
       },
     });
 
@@ -65,6 +69,20 @@ test("valida o código de uma sala antes de conectar", async ({ page }) => {
   await page.getByLabel("Código da sala").fill("CURTO");
   await page.getByRole("button", { name: /Assistir agora/i }).click();
   await expect(page.getByText("Cole o código completo da sala.")).toBeVisible();
+});
+
+test("copia o código da sala usando a ponte nativa", async ({ page }) => {
+  await mockDesktop(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: /Compartilhar minha tela/i }).click();
+  await expect(page.locator(".source-card").first()).toBeVisible();
+  await page.getByRole("button", { name: /Iniciar transmissão/i }).click();
+  const code = (await page.locator(".room-code-copy span").textContent())!.trim();
+
+  await page.getByRole("button", { name: /Copiar código/i }).click();
+
+  await expect(page.getByRole("button", { name: /Copiado/i })).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem("copied-room-code"))).toBe(code);
 });
 
 test("dois clientes se encontram pela descoberta P2P pública", async ({ page, context }) => {

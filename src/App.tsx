@@ -21,7 +21,15 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { joinRoom as joinTrysteroRoom, type Room } from "trystero";
+import {
+  getRelaySockets as getNostrRelaySockets,
+  joinRoom as joinNostrRoom,
+  type Room,
+} from "trystero";
+import {
+  getRelaySockets as getMqttRelaySockets,
+  joinRoom as joinMqttRoom,
+} from "@trystero-p2p/mqtt";
 
 type View = "home" | "host-setup" | "host-live" | "viewer-join" | "viewer-live";
 type Role = "host" | "viewer";
@@ -76,6 +84,7 @@ const QUALITY_PRESETS: QualityPreset[] = [
 
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const TRYSTERO_APP_ID = "com.gregpreto.tela.p2p.v1";
+const CONNECTION_TIMEOUT_MS = 20_000;
 
 function generateRoomCode() {
   const bytes = crypto.getRandomValues(new Uint8Array(20));
@@ -108,7 +117,7 @@ function App() {
   const [connectionState, setConnectionState] = useState("Preparando");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [version, setVersion] = useState("0.1.0");
+  const [version, setVersion] = useState("0.1.1");
   const [stats, setStats] = useState<ConnectionStats>({
     bitrate: "—",
     resolution: "—",
@@ -119,11 +128,13 @@ function App() {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const viewerStageRef = useRef<HTMLDivElement>(null);
-  const roomRef = useRef<Room | null>(null);
+  const roomRefs = useRef<Room[]>([]);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
-  const viewerIdsRef = useRef(new Set<string>());
-  const hostPeerIdRef = useRef<string | null>(null);
+  const viewerRoomsRef = useRef(new Map<string, Room>());
+  const hostSessionRef = useRef<{ peerId: string; room: Room } | null>(null);
+  const connectionErrorsRef = useRef(new Set<string>());
+  const connectionTimeoutRef = useRef<number | null>(null);
 
   const quality = useMemo(
     () => QUALITY_PRESETS.find((preset) => preset.key === qualityKey) ?? QUALITY_PRESETS[0],
@@ -161,71 +172,114 @@ function App() {
 
   const joinP2PRoom = useCallback((role: Role, code: string, stream?: MediaStream) => {
     const roomId = code.replaceAll("-", "");
-    const room = joinTrysteroRoom(
+    const roomConfig = {
+      appId: TRYSTERO_APP_ID,
+      password: roomId,
+      relayConfig: { warnOnRelayFailure: true },
+    };
+
+    const onJoinError = (strategy: string) => ({ error }: { error: string }) => {
+      console.error(`[${strategy}] falha ao conectar`, error);
+      connectionErrorsRef.current.add(strategy);
+      if (connectionErrorsRef.current.size >= 2 && !remoteStreamRef.current) {
+        setConnectionState("Rede bloqueou a conexão");
+        setError("Os computadores se encontraram, mas a rede bloqueou a rota direta. Tente liberar o Tela no Firewall do Windows e entrar novamente.");
+      }
+    };
+
+    const strategyRooms = [
       {
-        appId: TRYSTERO_APP_ID,
-        password: roomId,
+        strategy: "Nostr",
+        room: joinNostrRoom(roomConfig, roomId, { onJoinError: onJoinError("Nostr") }),
       },
-      roomId,
-    );
-    roomRef.current = room;
+      {
+        strategy: "MQTT",
+        room: joinMqttRoom(roomConfig, roomId, { onJoinError: onJoinError("MQTT") }),
+      },
+    ];
+    roomRefs.current = strategyRooms.map(({ room }) => room);
 
-    const presence = room.makeAction("presence");
-    const announceRole = (target: string) => {
-      void presence.send({ role }, { target });
-    };
-
-    room.onPeerJoin = (peerId) => announceRole(peerId);
-    room.onPeerLeave = (peerId) => {
-      if (role === "host") {
-        viewerIdsRef.current.delete(peerId);
-        setViewerCount(viewerIdsRef.current.size);
-      } else if (hostPeerIdRef.current === peerId) {
-        hostPeerIdRef.current = null;
-        remoteStreamRef.current = null;
-        setRemoteStream(null);
-        setConnectionState("A transmissão terminou");
-      }
-    };
-
-    presence.onMessage = (data, { peerId }) => {
-      const remoteRole = (data as { role?: Role })?.role;
-      if (role === "host" && remoteRole === "viewer" && stream) {
-        viewerIdsRef.current.add(peerId);
-        setViewerCount(viewerIdsRef.current.size);
-        setConnectionState("Transmitindo");
-        room.addStream(stream, { target: peerId, metadata: { kind: "screen" } });
-        window.setTimeout(() => {
-          const pc = room.getPeers()[peerId];
-          if (pc) void configureVideoSender(pc);
-        }, 500);
-      }
-
-      if (role === "viewer" && remoteRole === "host") {
-        hostPeerIdRef.current = peerId;
-        setConnectionState("Aguardando a transmissão");
-      }
-    };
-
-    if (role === "viewer") {
-      room.onPeerStream = (incomingStream, peerId, metadata) => {
-        if ((metadata as { kind?: string } | undefined)?.kind !== "screen") return;
-        hostPeerIdRef.current = peerId;
-        remoteStreamRef.current = incomingStream;
-        setRemoteStream(incomingStream);
-        setConnectionState("Conectado");
+    for (const { room, strategy } of strategyRooms) {
+      const presence = room.makeAction("presence");
+      const announceRole = (target: string) => {
+        void presence.send({ role }, { target });
       };
+
+      room.onPeerJoin = (peerId) => announceRole(peerId);
+      room.onPeerLeave = (peerId) => {
+        if (role === "host" && viewerRoomsRef.current.get(peerId) === room) {
+          viewerRoomsRef.current.delete(peerId);
+          setViewerCount(viewerRoomsRef.current.size);
+        } else if (
+          role === "viewer" &&
+          hostSessionRef.current?.peerId === peerId &&
+          hostSessionRef.current.room === room
+        ) {
+          hostSessionRef.current = null;
+          remoteStreamRef.current = null;
+          setRemoteStream(null);
+          setConnectionState("A transmissão terminou");
+        }
+      };
+
+      presence.onMessage = (data, { peerId }) => {
+        const remoteRole = (data as { role?: Role })?.role;
+        if (role === "host" && remoteRole === "viewer" && stream && !viewerRoomsRef.current.has(peerId)) {
+          viewerRoomsRef.current.set(peerId, room);
+          setViewerCount(viewerRoomsRef.current.size);
+          setConnectionState(`Transmitindo · ${strategy}`);
+          room.addStream(stream, { target: peerId, metadata: { kind: "screen", strategy } });
+          window.setTimeout(() => {
+            const pc = room.getPeers()[peerId];
+            if (pc) void configureVideoSender(pc);
+          }, 500);
+        }
+
+        if (role === "viewer" && remoteRole === "host" && !hostSessionRef.current) {
+          hostSessionRef.current = { peerId, room };
+          setConnectionState(`Aguardando vídeo · ${strategy}`);
+        }
+      };
+
+      if (role === "viewer") {
+        room.onPeerStream = (incomingStream, peerId, metadata) => {
+          if ((metadata as { kind?: string } | undefined)?.kind !== "screen" || remoteStreamRef.current) return;
+          hostSessionRef.current = { peerId, room };
+          remoteStreamRef.current = incomingStream;
+          setRemoteStream(incomingStream);
+          setConnectionState(`Conectado · ${strategy}`);
+          setError("");
+          if (connectionTimeoutRef.current !== null) window.clearTimeout(connectionTimeoutRef.current);
+        };
+      }
+
+      for (const peerId of Object.keys(room.getPeers())) announceRole(peerId);
     }
 
-    for (const peerId of Object.keys(room.getPeers())) announceRole(peerId);
-    return room;
+    if (role === "viewer") {
+      connectionTimeoutRef.current = window.setTimeout(() => {
+        if (remoteStreamRef.current) return;
+        const sockets = [
+          ...Object.values(getNostrRelaySockets()),
+          ...Object.values(getMqttRelaySockets()),
+        ] as WebSocket[];
+        const openRelays = sockets.filter((socket) => socket.readyState === WebSocket.OPEN).length;
+        setConnectionState("Ainda procurando");
+        setError(openRelays > 0
+          ? "A sala não respondeu. Confirme o código, mantenha o anfitrião transmitindo e verifique se os dois estão usando a versão 0.1.1."
+          : "Não foi possível acessar os serviços de sala. Verifique a internet ou o Firewall do Windows e tente novamente.");
+      }, CONNECTION_TIMEOUT_MS);
+    }
   }, [configureVideoSender]);
 
   const cleanup = useCallback(() => {
-    roomRef.current?.leave();
-    roomRef.current = null;
-    viewerIdsRef.current.clear();
-    hostPeerIdRef.current = null;
+    roomRefs.current.forEach((room) => room.leave());
+    roomRefs.current = [];
+    viewerRoomsRef.current.clear();
+    hostSessionRef.current = null;
+    connectionErrorsRef.current.clear();
+    if (connectionTimeoutRef.current !== null) window.clearTimeout(connectionTimeoutRef.current);
+    connectionTimeoutRef.current = null;
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     remoteStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
@@ -322,9 +376,16 @@ function App() {
   }, [cleanup]);
 
   const copyInvite = useCallback(async () => {
-    await navigator.clipboard.writeText(roomCode);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
+    try {
+      const didCopy = await window.telaDesktop.copyText(roomCode);
+      if (!didCopy) throw new Error("O Windows não confirmou a cópia");
+      setCopied(true);
+      setError("");
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+      setError("Não foi possível copiar automaticamente. Selecione o código e pressione Ctrl+C.");
+    }
   }, [roomCode]);
 
   useEffect(() => {
@@ -333,32 +394,37 @@ function App() {
     let previousTimestamp = 0;
 
     const interval = window.setInterval(async () => {
-      const pc = Object.values(roomRef.current?.getPeers() ?? {})[0] as RTCPeerConnection | undefined;
+      let pc: RTCPeerConnection | undefined;
+      for (const room of roomRefs.current) {
+        pc = Object.values(room.getPeers())[0] as RTCPeerConnection | undefined;
+        if (pc) break;
+      }
       if (!pc) return;
       const report = await pc.getStats();
-      let next: ConnectionStats = { ...stats };
-
-      report.forEach((stat) => {
-        const isMedia = stat.type === "outbound-rtp" || stat.type === "inbound-rtp";
-        if (isMedia && stat.kind === "video") {
-          const bytes = stat.bytesSent ?? stat.bytesReceived ?? 0;
-          if (previousTimestamp && stat.timestamp > previousTimestamp) {
-            next.bitrate = formatBitrate(((bytes - previousBytes) * 8 * 1000) / (stat.timestamp - previousTimestamp));
+      setStats((current) => {
+        const next: ConnectionStats = { ...current };
+        report.forEach((stat) => {
+          const isMedia = stat.type === "outbound-rtp" || stat.type === "inbound-rtp";
+          if (isMedia && stat.kind === "video") {
+            const bytes = stat.bytesSent ?? stat.bytesReceived ?? 0;
+            if (previousTimestamp && stat.timestamp > previousTimestamp) {
+              next.bitrate = formatBitrate(((bytes - previousBytes) * 8 * 1000) / (stat.timestamp - previousTimestamp));
+            }
+            previousBytes = bytes;
+            previousTimestamp = stat.timestamp;
+            next.resolution = stat.frameWidth && stat.frameHeight ? `${stat.frameWidth}×${stat.frameHeight}` : next.resolution;
+            next.fps = stat.framesPerSecond ? `${Math.round(stat.framesPerSecond)} FPS` : next.fps;
           }
-          previousBytes = bytes;
-          previousTimestamp = stat.timestamp;
-          next.resolution = stat.frameWidth && stat.frameHeight ? `${stat.frameWidth}×${stat.frameHeight}` : next.resolution;
-          next.fps = stat.framesPerSecond ? `${Math.round(stat.framesPerSecond)} FPS` : next.fps;
-        }
-        if (stat.type === "candidate-pair" && stat.state === "succeeded" && stat.currentRoundTripTime) {
-          next.latency = `${Math.round(stat.currentRoundTripTime * 1000)} ms`;
-        }
+          if (stat.type === "candidate-pair" && stat.state === "succeeded" && stat.currentRoundTripTime) {
+            next.latency = `${Math.round(stat.currentRoundTripTime * 1000)} ms`;
+          }
+        });
+        return next;
       });
-      setStats(next);
     }, 1_000);
 
     return () => window.clearInterval(interval);
-  }, [stats, view]);
+  }, [view]);
 
   return (
     <main className="app-shell">

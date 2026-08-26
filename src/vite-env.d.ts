@@ -14,5 +14,6 @@ interface Window {
     getSources(): Promise<CaptureSource[]>;
     selectSource(sourceId: string, withSystemAudio: boolean): Promise<boolean>;
     getVersion(): Promise<string>;
+    copyText(value: string): Promise<boolean>;
   };
 }

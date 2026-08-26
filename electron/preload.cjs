@@ -5,4 +5,5 @@ contextBridge.exposeInMainWorld("telaDesktop", {
   selectSource: (sourceId, withSystemAudio) =>
     ipcRenderer.invoke("capture:select-source", { sourceId, withSystemAudio }),
   getVersion: () => ipcRenderer.invoke("app:get-version"),
+  copyText: (value) => ipcRenderer.invoke("clipboard:write-text", value),
 });

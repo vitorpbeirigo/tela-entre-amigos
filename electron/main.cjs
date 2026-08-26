@@ -1,4 +1,4 @@
-const { app, BrowserWindow, desktopCapturer, ipcMain, session } = require("electron");
+const { app, BrowserWindow, clipboard, desktopCapturer, ipcMain, session } = require("electron");
 const path = require("node:path");
 
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
@@ -97,6 +97,12 @@ app.whenReady().then(() => {
   ipcMain.handle("app:get-version", (event) => {
     if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
     return app.getVersion();
+  });
+  ipcMain.handle("clipboard:write-text", async (event, value) => {
+    if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
+    if (typeof value !== "string" || value.length > 200) throw new TypeError("Texto inválido");
+    await clipboard.writeText(value);
+    return await clipboard.readText() === value;
   });
 
   createWindow();
