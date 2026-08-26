@@ -15,8 +15,8 @@ O anfitrião escolhe entre 1080p a 30 FPS, 1080p a 60 FPS e 1440p a 60 FPS. A qu
 
 ## Usar no macOS
 
-- `Tela-0.4.0-mac-arm64.dmg`: Macs com Apple Silicon (M1, M2, M3, M4 ou mais novo).
-- `Tela-0.4.0-mac-x64.dmg`: Macs Intel.
+- `Tela-0.4.1-mac-arm64.dmg`: Macs com Apple Silicon (M1, M2, M3, M4 ou mais novo).
+- `Tela-0.4.1-mac-x64.dmg`: Macs Intel.
 - Recomendado: macOS 13 ou mais recente para capturar também o áudio do sistema sem instalar um driver virtual.
 
 Na primeira transmissão, o macOS pedirá acesso à gravação de tela e ao áudio do sistema. Autorize o **Tela** em **Ajustes do Sistema > Privacidade e Segurança**, feche o aplicativo completamente e abra novamente. Se a permissão estiver bloqueada, o próprio Tela mostra um botão para abrir esses ajustes.
@@ -53,7 +53,7 @@ npm.cmd run dev
 npm.cmd run build
 ```
 
-No Windows, o instalador será gerado em `artifacts/Tela-Setup-0.4.0.exe`, junto de `latest.yml` e do arquivo `.blockmap` usados pelo atualizador.
+No Windows, o instalador será gerado em `artifacts/Tela-Setup-0.4.1.exe`, junto de `latest.yml` e do arquivo `.blockmap` usados pelo atualizador.
 
 Os pacotes macOS devem ser gerados num Mac ou pelo workflow do GitHub Actions:
 
@@ -70,8 +70,8 @@ O workflow incluído compila o instalador em uma máquina Windows do GitHub:
 ```powershell
 git remote add origin URL_DO_SEU_REPOSITORIO
 git push -u origin main
-git tag v0.4.0
-git push origin v0.4.0
+git tag v0.4.1
+git push origin v0.4.1
 ```
 
 Ao enviar uma tag `v*`, o GitHub Actions compila Windows, macOS Intel e macOS Apple Silicon e cria uma Release com todos os instaladores anexados. Também é possível executar **Build Tela installers** manualmente na aba Actions para baixar os arquivos como artefatos.

@@ -154,7 +154,7 @@ function App() {
   const [connectionState, setConnectionState] = useState("Preparando");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [version, setVersion] = useState("0.4.0");
+  const [version, setVersion] = useState("0.4.1");
   const [platform, setPlatform] = useState<NodeJS.Platform | "">("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [stats, setStats] = useState<ConnectionStats>({
