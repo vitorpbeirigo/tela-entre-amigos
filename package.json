@@ -1,6 +1,6 @@
 {
   "name": "tela-entre-amigos",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "Compartilhamento de tela P2P em alta qualidade para pequenos grupos.",
   "main": "electron/main.cjs",

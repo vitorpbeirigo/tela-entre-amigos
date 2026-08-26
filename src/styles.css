@@ -322,6 +322,12 @@ button:focus-visible, input:focus-visible {
 .waiting-ring { position: relative; width: 70px; height: 70px; display: grid; place-items: center; border-radius: 50%; color: var(--color-electric-iris); background: rgba(128, 82, 255, .1); }
 .viewer-waiting h2 { margin: 22px 0 9px; font-size: 27px; font-weight: 400; letter-spacing: -.035em; }
 .viewer-waiting p { margin: 0; color: var(--color-ash-gray); font-size: 13px; }
+.viewer-volume { position: absolute; left: 14px; bottom: 14px; min-height: 40px; padding: 0 12px 0 7px; display: flex; align-items: center; gap: 9px; border: 1px solid rgba(255, 255, 255, .1); border-radius: 20px; background: rgba(0, 0, 0, .76); color: var(--color-silver-mist); backdrop-filter: blur(10px); }
+.viewer-volume button { width: 31px; height: 31px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; }
+.viewer-volume button:hover { background: rgba(255, 255, 255, .1); color: white; }
+.viewer-volume button:focus-visible, .viewer-volume input:focus-visible { outline: 2px solid var(--color-electric-iris); outline-offset: 2px; }
+.viewer-volume input { width: 112px; accent-color: var(--color-electric-iris); cursor: pointer; }
+.viewer-volume output { min-width: 31px; color: var(--color-ash-gray); font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; text-align: right; }
 .viewer-stats { position: absolute; right: 14px; bottom: 14px; padding: 9px 12px; display: flex; gap: 14px; border-radius: 18px; background: rgba(0, 0, 0, .76); color: var(--color-ash-gray); font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; backdrop-filter: blur(10px); }
 .headphone-note { margin-top: 14px; }
 
@@ -378,6 +384,8 @@ button:focus-visible, input:focus-visible {
   .live-header { align-items: flex-start; flex-direction: column; }
   .watch-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; }
   .watch-room { order: 3; width: 100%; justify-content: center; }
+  .viewer-volume input { width: min(112px, 28vw); }
+  .viewer-stats { bottom: 66px; }
   .viewer-stats { max-width: calc(100% - 28px); flex-wrap: wrap; justify-content: center; }
 }
 

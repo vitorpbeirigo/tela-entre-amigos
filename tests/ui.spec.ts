@@ -15,7 +15,7 @@ const mockDesktop = async (
 
     Object.defineProperty(window, "telaDesktop", {
       value: {
-        getVersion: async () => "0.4.1-test",
+        getVersion: async () => "0.6.0-test",
         getPlatform: async () => desktopPlatform,
         getCapturePermission: async () => permission,
         openCaptureSettings: async () => {
@@ -119,6 +119,26 @@ test("valida o código de uma sala antes de conectar", async ({ page }) => {
   await page.getByLabel("Código da sala").fill("CURTO");
   await page.getByRole("button", { name: /Assistir agora/i }).click();
   await expect(page.getByText("Cole o código completo da sala.")).toBeVisible();
+});
+
+test("permite ao espectador controlar e silenciar o volume", async ({ page }) => {
+  await mockDesktop(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: /Entrar em uma sala/i }).click();
+  await page.getByLabel("Código da sala").fill("ABCDE-FGHJK-LMNPQ-RSTUV");
+  await page.getByRole("button", { name: /Assistir agora/i }).click();
+
+  const volume = page.getByRole("slider", { name: "Volume da transmissão" });
+  await expect(volume).toHaveValue("100");
+  await volume.fill("35");
+  await expect(page.locator(".viewer-volume output")).toHaveText("35%");
+  await expect(page.locator(".viewer-stage video")).toHaveJSProperty("volume", 0.35);
+
+  await page.getByRole("button", { name: "Silenciar transmissão" }).click();
+  await expect(volume).toHaveValue("0");
+  await expect(page.locator(".viewer-stage video")).toHaveJSProperty("muted", true);
+  await page.getByRole("button", { name: "Ativar som da transmissão" }).click();
+  await expect(volume).toHaveValue("35");
 });
 
 test("copia o código da sala usando a ponte nativa", async ({ page }) => {

@@ -18,6 +18,7 @@ import {
   Sparkles,
   Users,
   Volume2,
+  VolumeX,
   Wifi,
   X,
 } from "lucide-react";
@@ -201,9 +202,10 @@ function App() {
   const [connectionState, setConnectionState] = useState("Preparando");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [version, setVersion] = useState("0.5.0");
+  const [version, setVersion] = useState("0.6.0");
   const [platform, setPlatform] = useState<NodeJS.Platform | "">("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [viewerVolume, setViewerVolume] = useState(1);
   const [stats, setStats] = useState<ConnectionStats>({
     bitrate: "—",
     resolution: "—",
@@ -214,6 +216,7 @@ function App() {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const viewerStageRef = useRef<HTMLDivElement>(null);
+  const previousViewerVolumeRef = useRef(1);
   const roomRefs = useRef<Room[]>([]);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
@@ -243,8 +246,27 @@ function App() {
   }, [localStream, view]);
 
   useEffect(() => {
-    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
-  }, [remoteStream, view]);
+    if (!remoteVideoRef.current) return;
+    remoteVideoRef.current.srcObject = remoteStream;
+    remoteVideoRef.current.volume = viewerVolume;
+    remoteVideoRef.current.muted = viewerVolume === 0;
+  }, [remoteStream, view, viewerVolume]);
+
+  const changeViewerVolume = useCallback((nextVolume: number) => {
+    const normalizedVolume = Math.min(1, Math.max(0, nextVolume));
+    if (normalizedVolume > 0) previousViewerVolumeRef.current = normalizedVolume;
+    setViewerVolume(normalizedVolume);
+  }, []);
+
+  const toggleViewerMute = useCallback(() => {
+    setViewerVolume((currentVolume) => {
+      if (currentVolume > 0) {
+        previousViewerVolumeRef.current = currentVolume;
+        return 0;
+      }
+      return previousViewerVolumeRef.current || 1;
+    });
+  }, []);
 
   const stopFilteredAudio = useCallback(() => {
     audioPcmUnsubscribeRef.current?.();
@@ -874,6 +896,27 @@ function App() {
                 <p>A transmissão aparecerá aqui automaticamente.</p>
               </div>
             )}
+            <div className="viewer-volume" aria-label="Volume da transmissão">
+              <button
+                type="button"
+                onClick={toggleViewerMute}
+                aria-label={viewerVolume === 0 ? "Ativar som da transmissão" : "Silenciar transmissão"}
+                title={viewerVolume === 0 ? "Ativar som" : "Silenciar"}
+              >
+                {viewerVolume === 0 ? <VolumeX size={17} /> : <Volume2 size={17} />}
+              </button>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={Math.round(viewerVolume * 100)}
+                onChange={(event) => changeViewerVolume(Number(event.target.value) / 100)}
+                aria-label="Volume da transmissão"
+                aria-valuetext={`${Math.round(viewerVolume * 100)}%`}
+              />
+              <output aria-live="polite">{Math.round(viewerVolume * 100)}%</output>
+            </div>
             <div className="viewer-stats">
               <span>{stats.resolution}</span><span>{stats.fps}</span><span>{stats.bitrate}</span><span>{stats.latency}</span>
             </div>
