@@ -1,4 +1,4 @@
-name: Build Windows installer
+name: Build Tela installers
 
 on:
   workflow_dispatch:
@@ -10,7 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  windows:
+    name: Windows x64
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -25,24 +26,63 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build installer
-        run: npm run build
+      - name: Build Windows installer
+        run: npm run build:win
 
-      - name: Upload workflow artifact
+      - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Tela-Windows
+          name: Tela-Windows-x64
           path: |
             artifacts/Tela-Setup-*.exe
             artifacts/Tela-Setup-*.blockmap
             artifacts/latest.yml
 
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+  macos:
+    name: macOS Intel and Apple Silicon
+    runs-on: macos-latest
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build unsigned macOS installers
+        run: npm run build:mac
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tela-macOS
+          path: |
+            release/Tela-*-mac-*.dmg
+            release/Tela-*-mac-*.zip
+            release/Tela-*-mac-*.blockmap
+            release/latest-mac.yml
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            artifacts/Tela-Setup-*.exe
-            artifacts/Tela-Setup-*.blockmap
-            artifacts/latest.yml
+          files: release-assets/*
           generate_release_notes: true

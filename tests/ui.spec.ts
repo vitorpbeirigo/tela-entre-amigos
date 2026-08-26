@@ -1,7 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const mockDesktop = async (page: Page, initialUpdateStatus?: UpdateStatus) => {
-  await page.addInitScript((updateStatus) => {
+const mockDesktop = async (
+  page: Page,
+  initialUpdateStatus?: UpdateStatus,
+  platform: NodeJS.Platform = "win32",
+  capturePermission: "not-determined" | "granted" | "denied" | "restricted" | "unknown" = "granted",
+) => {
+  await page.addInitScript(({ updateStatus, desktopPlatform, permission }) => {
     const thumbnail =
       "data:image/svg+xml," +
       encodeURIComponent(
@@ -10,7 +15,13 @@ const mockDesktop = async (page: Page, initialUpdateStatus?: UpdateStatus) => {
 
     Object.defineProperty(window, "telaDesktop", {
       value: {
-        getVersion: async () => "0.2.0-test",
+        getVersion: async () => "0.3.0-test",
+        getPlatform: async () => desktopPlatform,
+        getCapturePermission: async () => permission,
+        openCaptureSettings: async () => {
+          sessionStorage.setItem("capture-settings-opened", "true");
+          return true;
+        },
         getSources: async () => [
           {
             id: "screen:1:0",
@@ -54,7 +65,7 @@ const mockDesktop = async (page: Page, initialUpdateStatus?: UpdateStatus) => {
         return canvas.captureStream(10);
       },
     });
-  }, initialUpdateStatus);
+  }, { updateStatus: initialUpdateStatus, desktopPlatform: platform, permission: capturePermission });
 };
 
 test("carrega a tela inicial e abre a configuração do anfitrião", async ({ page }) => {
@@ -70,6 +81,16 @@ test("carrega a tela inicial e abre a configuração do anfitrião", async ({ pa
   await expect(page.getByText("Tela principal", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /Iniciar transmissão/i })).toBeEnabled();
   expect(errors).toEqual([]);
+});
+
+test("orienta a liberar gravação de tela quando o macOS bloqueia a captura", async ({ page }) => {
+  await mockDesktop(page, undefined, "darwin", "denied");
+  await page.goto("/");
+  await page.getByRole("button", { name: /Compartilhar minha tela/i }).click();
+
+  await expect(page.getByText(/macOS bloqueou a gravação de tela/i)).toBeVisible();
+  await page.getByRole("button", { name: "Abrir ajustes" }).click();
+  expect(await page.evaluate(() => sessionStorage.getItem("capture-settings-opened"))).toBe("true");
 });
 
 test("valida o código de uma sala antes de conectar", async ({ page }) => {

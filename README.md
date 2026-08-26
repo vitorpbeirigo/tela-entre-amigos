@@ -1,6 +1,6 @@
 # Tela
 
-Aplicativo Windows de compartilhamento de tela P2P em alta qualidade para pequenos grupos. Não precisa de cadastro, banco de dados ou servidor próprio.
+Aplicativo Windows e macOS de compartilhamento de tela P2P em alta qualidade para pequenos grupos. Não precisa de cadastro, banco de dados ou servidor próprio.
 
 ## Como usar
 
@@ -11,7 +11,17 @@ Aplicativo Windows de compartilhamento de tela P2P em alta qualidade para pequen
 
 O anfitrião escolhe entre 1080p a 30 FPS, 1080p a 60 FPS e 1440p a 60 FPS. A qualidade real também depende do computador, da tela selecionada e da rota de internet entre os participantes.
 
-> O instalador ainda não possui certificado de assinatura de código. O Windows SmartScreen pode mostrar um aviso na primeira instalação; escolha **Mais informações** e **Executar assim mesmo** apenas se você recebeu o arquivo deste repositório ou diretamente do responsável pelo grupo.
+> Os instaladores ainda não possuem certificado de assinatura de código. No Windows, o SmartScreen pode pedir **Mais informações** e **Executar assim mesmo**. No macOS, abra o aplicativo com o botão direito e escolha **Abrir**; se necessário, use **Ajustes do Sistema > Privacidade e Segurança > Abrir Mesmo Assim**. Faça isso somente com arquivos deste repositório ou recebidos diretamente do responsável pelo grupo.
+
+## Usar no macOS
+
+- `Tela-0.3.0-mac-arm64.dmg`: Macs com Apple Silicon (M1, M2, M3, M4 ou mais novo).
+- `Tela-0.3.0-mac-x64.dmg`: Macs Intel.
+- Recomendado: macOS 13 ou mais recente para capturar também o áudio do sistema sem instalar um driver virtual.
+
+Na primeira transmissão, o macOS pedirá acesso à gravação de tela e ao áudio do sistema. Autorize o **Tela** em **Ajustes do Sistema > Privacidade e Segurança**, feche o aplicativo completamente e abra novamente. Se a permissão estiver bloqueada, o próprio Tela mostra um botão para abrir esses ajustes.
+
+Como esta edição é gratuita e não é assinada pela Apple, as atualizações do Mac são manuais: baixe o `.dmg` mais recente na página de Releases e substitua o aplicativo anterior. A atualização automática continua disponível no Windows.
 
 ## Arquitetura
 
@@ -29,13 +39,21 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-## Gerar o instalador
+## Gerar os instaladores
 
 ```powershell
 npm.cmd run build
 ```
 
-O instalador será gerado em `artifacts/Tela-Setup-0.2.0.exe`, junto de `latest.yml` e do arquivo `.blockmap` usados pelo atualizador. A pasta é ignorada pelo Git; publique esses arquivos em uma GitHub Release.
+No Windows, o instalador será gerado em `artifacts/Tela-Setup-0.3.0.exe`, junto de `latest.yml` e do arquivo `.blockmap` usados pelo atualizador.
+
+Os pacotes macOS devem ser gerados num Mac ou pelo workflow do GitHub Actions:
+
+```bash
+npm run build:mac
+```
+
+O comando produz `.dmg` e `.zip` separados para Intel (`x64`) e Apple Silicon (`arm64`) dentro de `release/`. A versão gratuita é deliberadamente gerada sem assinatura e sem notarização da Apple.
 
 ## Publicar no GitHub
 
@@ -44,13 +62,13 @@ O workflow incluído compila o instalador em uma máquina Windows do GitHub:
 ```powershell
 git remote add origin URL_DO_SEU_REPOSITORIO
 git push -u origin main
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
-Ao enviar uma tag `v*`, o GitHub Actions cria uma Release com o instalador anexado. Também é possível executar **Build Windows installer** manualmente na aba Actions para baixar o instalador como artefato.
+Ao enviar uma tag `v*`, o GitHub Actions compila Windows, macOS Intel e macOS Apple Silicon e cria uma Release com todos os instaladores anexados. Também é possível executar **Build Tela installers** manualmente na aba Actions para baixar os arquivos como artefatos.
 
-A versão `0.2.0` é a última que os amigos precisam baixar manualmente. Depois dela, o Tela verifica Releases, baixa novas versões em segundo plano e mostra o botão **Reiniciar agora** quando a atualização estiver pronta.
+No Windows, o Tela verifica Releases, baixa novas versões em segundo plano e mostra o botão **Reiniciar agora** quando a atualização estiver pronta. No macOS gratuito e não assinado, cada nova versão precisa ser instalada manualmente.
 
 ## Ativar o fallback TURN
 

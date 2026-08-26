@@ -118,7 +118,8 @@ function App() {
   const [connectionState, setConnectionState] = useState("Preparando");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [version, setVersion] = useState("0.2.0");
+  const [version, setVersion] = useState("0.3.0");
+  const [platform, setPlatform] = useState<NodeJS.Platform | "">("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [stats, setStats] = useState<ConnectionStats>({
     bitrate: "—",
@@ -145,6 +146,7 @@ function App() {
 
   useEffect(() => {
     window.telaDesktop?.getVersion().then(setVersion).catch(() => undefined);
+    window.telaDesktop?.getPlatform().then(setPlatform).catch(() => undefined);
     return window.telaDesktop?.onUpdateStatus?.(setUpdateStatus);
   }, []);
 
@@ -300,16 +302,31 @@ function App() {
     setSourcesLoading(true);
     setError("");
     try {
+      const permission = await window.telaDesktop.getCapturePermission();
+      if (permission === "denied" || permission === "restricted") {
+        setSources([]);
+        setError("O macOS bloqueou a gravação de tela. Abra Privacidade e Segurança, permita o Tela e reinicie o aplicativo.");
+        return;
+      }
       const availableSources = await window.telaDesktop.getSources();
+      if (platform === "darwin" && availableSources.length === 0) {
+        const currentPermission = await window.telaDesktop.getCapturePermission();
+        if (currentPermission !== "granted") {
+          setError("O macOS ainda não liberou a gravação de tela. Autorize o Tela em Privacidade e Segurança e abra o aplicativo novamente.");
+          return;
+        }
+      }
       setSources(availableSources);
       const entireScreen = availableSources.find((source) => source.type === "screen");
       setSelectedSourceId((current) => current || entireScreen?.id || availableSources[0]?.id || "");
     } catch {
-      setError("Não foi possível listar as telas e janelas deste computador.");
+      setError(platform === "darwin"
+        ? "Não foi possível acessar as telas. Autorize o Tela em Privacidade e Segurança > Gravação de Tela e Áudio do Sistema."
+        : "Não foi possível listar as telas e janelas deste computador.");
     } finally {
       setSourcesLoading(false);
     }
-  }, []);
+  }, [platform]);
 
   const openHostSetup = useCallback(() => {
     setView("host-setup");
@@ -350,9 +367,12 @@ function App() {
     } catch (startError) {
       cleanup();
       setView("host-setup");
-      setError(startError instanceof Error ? startError.message : "Não foi possível iniciar a transmissão.");
+      const permissionDenied = startError instanceof DOMException && startError.name === "NotAllowedError";
+      setError(permissionDenied && platform === "darwin"
+        ? "O macOS não liberou a captura. Permita o Tela em Privacidade e Segurança > Gravação de Tela e Áudio do Sistema e abra o app novamente."
+        : startError instanceof Error ? startError.message : "Não foi possível iniciar a transmissão.");
     }
-  }, [cleanup, joinP2PRoom, quality, selectedSourceId, withSystemAudio]);
+  }, [cleanup, joinP2PRoom, platform, quality, selectedSourceId, withSystemAudio]);
 
   const joinRoom = useCallback(async () => {
     const code = normalizeRoomCode(joinCode);
@@ -513,7 +533,13 @@ function App() {
             onBack={leaveSession}
           />
 
-          {error && <ErrorBanner message={error} />}
+          {error && (
+            <ErrorBanner
+              message={error}
+              actionLabel={platform === "darwin" ? "Abrir ajustes" : undefined}
+              onAction={platform === "darwin" ? () => void window.telaDesktop.openCaptureSettings() : undefined}
+            />
+          )}
 
           <div className="setup-layout">
             <div className="source-panel panel">
@@ -698,8 +724,24 @@ function PageHeading({ title, subtitle, onBack }: { title: string; subtitle: str
   );
 }
 
-function ErrorBanner({ message, compact = false }: { message: string; compact?: boolean }) {
-  return <div className={`error-banner ${compact ? "compact" : ""}`}><X size={16} /><span>{message}</span></div>;
+function ErrorBanner({
+  message,
+  compact = false,
+  actionLabel,
+  onAction,
+}: {
+  message: string;
+  compact?: boolean;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div className={`error-banner ${compact ? "compact" : ""}`}>
+      <X size={16} />
+      <span>{message}</span>
+      {actionLabel && onAction && <button onClick={onAction}>{actionLabel}</button>}
+    </div>
+  );
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

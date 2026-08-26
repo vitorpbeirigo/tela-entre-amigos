@@ -5,6 +5,9 @@ contextBridge.exposeInMainWorld("telaDesktop", {
   selectSource: (sourceId, withSystemAudio) =>
     ipcRenderer.invoke("capture:select-source", { sourceId, withSystemAudio }),
   getVersion: () => ipcRenderer.invoke("app:get-version"),
+  getPlatform: () => ipcRenderer.invoke("app:get-platform"),
+  getCapturePermission: () => ipcRenderer.invoke("capture:get-permission"),
+  openCaptureSettings: () => ipcRenderer.invoke("capture:open-settings"),
   copyText: (value) => ipcRenderer.invoke("clipboard:write-text", value),
   getTurnServers: () => ipcRenderer.invoke("network:get-turn-servers"),
   checkForUpdates: () => ipcRenderer.invoke("update:check"),

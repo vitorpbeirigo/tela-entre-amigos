@@ -150,6 +150,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .join-button { width: 100%; margin: 14px 0 18px; }
 
 .error-banner { min-height: 42px; margin: 0 0 16px; padding: 10px 13px; display: flex; align-items: center; gap: 9px; border: 1px solid rgba(255,107,107,.28); border-radius: 7px; background: rgba(255,107,107,.07); color: #ff9a9a; font-size: 12px; }
+.error-banner > span { flex: 1; }
+.error-banner button { flex: none; border: 1px solid rgba(255,154,154,.35); border-radius: 6px; padding: 6px 9px; background: rgba(255,154,154,.08); color: #ffc0c0; font: inherit; cursor: pointer; }
+.error-banner button:hover { background: rgba(255,154,154,.15); }
 .error-banner.compact { margin: 12px 0 0; text-align: left; }
 
 .live-header { margin-bottom: 24px; display: flex; align-items: flex-end; justify-content: space-between; }

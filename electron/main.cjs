@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, desktopCapturer, ipcMain, session } = require("electron");
+const { app, BrowserWindow, clipboard, desktopCapturer, ipcMain, session, shell, systemPreferences } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("node:path");
 
@@ -71,7 +71,7 @@ function sendUpdateStatus(status) {
 }
 
 function configureAutoUpdater() {
-  if (!app.isPackaged) return;
+  if (!app.isPackaged || process.platform === "darwin") return;
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
@@ -185,6 +185,20 @@ app.whenReady().then(() => {
     if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
     return app.getVersion();
   });
+  ipcMain.handle("app:get-platform", (event) => {
+    if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
+    return process.platform;
+  });
+  ipcMain.handle("capture:get-permission", (event) => {
+    if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
+    return process.platform === "darwin" ? systemPreferences.getMediaAccessStatus("screen") : "granted";
+  });
+  ipcMain.handle("capture:open-settings", async (event) => {
+    if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
+    if (process.platform !== "darwin") return false;
+    await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
+    return true;
+  });
   ipcMain.handle("clipboard:write-text", async (event, value) => {
     if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
     if (typeof value !== "string" || value.length > 200) throw new TypeError("Texto inválido");
@@ -198,12 +212,13 @@ app.whenReady().then(() => {
   ipcMain.handle("update:check", async (event) => {
     if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
     if (!app.isPackaged) return { state: "development" };
+    if (process.platform === "darwin") return { state: "manual" };
     await autoUpdater.checkForUpdates();
     return { state: "checking" };
   });
   ipcMain.handle("update:install", (event) => {
     if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
-    if (!app.isPackaged) return false;
+    if (!app.isPackaged || process.platform === "darwin") return false;
     setImmediate(() => autoUpdater.quitAndInstall(false, true));
     return true;
   });
