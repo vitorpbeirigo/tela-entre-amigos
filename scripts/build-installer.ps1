@@ -17,7 +17,7 @@ New-Item -ItemType Directory -Path $buildOutput -Force | Out-Null
 New-Item -ItemType Directory -Path $artifactOutput -Force | Out-Null
 
 $builder = Join-Path $projectRoot 'node_modules\.bin\electron-builder.cmd'
-& $builder --win nsis "--config.directories.output=$buildOutput"
+& $builder --win nsis --publish never "--config.directories.output=$buildOutput"
 
 if ($LASTEXITCODE -ne 0) {
   throw "electron-builder terminou com codigo $LASTEXITCODE"
