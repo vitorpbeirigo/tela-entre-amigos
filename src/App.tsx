@@ -21,7 +21,7 @@ import {
   Wifi,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   getRelaySockets as getNostrRelaySockets,
   joinRoom as joinNostrRoom,
@@ -86,6 +86,42 @@ const QUALITY_PRESETS: QualityPreset[] = [
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const TRYSTERO_APP_ID = "com.gregpreto.tela.p2p.v1";
 const CONNECTION_TIMEOUT_MS = 20_000;
+const PARTICLE_COLORS = ["#8052ff", "#ffb829", "#15846e", "#b96cff", "#5d8dff", "#ff5caa"];
+
+function seededValue(index: number, salt: number) {
+  const value = Math.sin(index * 12.9898 + salt * 78.233) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+const CONSTELLATION_PARTICLES = Array.from({ length: 180 }, (_, index) => {
+  const lobe = index % 2 === 0 ? -1 : 1;
+  const angle = seededValue(index, 1) * Math.PI * 2;
+  const radius = Math.sqrt(seededValue(index, 2));
+  const x = 50 + lobe * 16 + Math.cos(angle) * 29 * radius + lobe * (1 - radius) * 3;
+  const y = 49 + Math.sin(angle) * 32 * radius + Math.cos(angle * 2) * 2.5;
+
+  return {
+    x,
+    y,
+    size: 4 + seededValue(index, 3) * 7,
+    rotation: Math.round(seededValue(index, 4) * 360),
+    color: PARTICLE_COLORS[index % PARTICLE_COLORS.length],
+    delay: seededValue(index, 5) * -8,
+    duration: 5 + seededValue(index, 6) * 6,
+    opacity: 0.35 + seededValue(index, 7) * 0.65,
+  };
+});
+
+const AMBIENT_PARTICLES = Array.from({ length: 28 }, (_, index) => ({
+  x: seededValue(index, 21) * 100,
+  y: seededValue(index, 22) * 100,
+  size: 4 + seededValue(index, 23) * 5,
+  rotation: Math.round(seededValue(index, 24) * 360),
+  color: PARTICLE_COLORS[(index + 2) % PARTICLE_COLORS.length],
+  delay: seededValue(index, 25) * -10,
+  duration: 8 + seededValue(index, 26) * 8,
+  opacity: 0.12 + seededValue(index, 27) * 0.24,
+}));
 
 function generateRoomCode() {
   const bytes = crypto.getRandomValues(new Uint8Array(20));
@@ -118,7 +154,7 @@ function App() {
   const [connectionState, setConnectionState] = useState("Preparando");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [version, setVersion] = useState("0.3.1");
+  const [version, setVersion] = useState("0.4.0");
   const [platform, setPlatform] = useState<NodeJS.Platform | "">("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [stats, setStats] = useState<ConnectionStats>({
@@ -455,15 +491,16 @@ function App() {
   }, [view]);
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell view-${view}`}>
+      <ParticleField particles={AMBIENT_PARTICLES} className="ambient-particles" />
       <header className="topbar">
         <button className="brand" onClick={leaveSession} aria-label="Voltar ao início">
-          <span className="brand-mark"><ScreenShare size={18} strokeWidth={2.2} /></span>
+          <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
           <span>Tela</span>
         </button>
         <div className="topbar-status">
           <span className="status-dot" />
-          P2P privado
+          Transmissão privada
           <span className="version">v{version}</span>
         </div>
       </header>
@@ -487,39 +524,31 @@ function App() {
         <section className="home-grid page-enter">
           <div className="hero-copy">
             <div className="eyebrow"><Sparkles size={14} /> Feito para a sua turma</div>
-            <h1>Sua tela.<br /><span>Sem intermediários.</span></h1>
+            <h1>Sua tela.<br /><span>Entre amigos.</span></h1>
             <p>Compartilhe o monitor inteiro com áudio, em alta qualidade, direto para os computadores dos seus amigos.</p>
             <div className="home-actions">
               <button className="button button-primary" onClick={openHostSetup}>
                 <MonitorUp size={18} /> Compartilhar minha tela
               </button>
-              <button className="button button-secondary" onClick={() => { setError(""); setView("viewer-join"); }}>
+              <button className="button button-ghost" onClick={() => { setError(""); setView("viewer-join"); }}>
                 <Users size={18} /> Entrar em uma sala
               </button>
             </div>
             <div className="trust-row">
               <span><ShieldCheck size={15} /> Criptografado</span>
-              <span><Wifi size={15} /> Conexão direta</span>
+              <span><Wifi size={15} /> Conexão protegida</span>
               <span><Radio size={15} /> Até 1440p60</span>
             </div>
           </div>
 
           <div className="hero-visual" aria-hidden="true">
-            <div className="stream-window">
-              <div className="stream-window-bar">
-                <div className="window-dots"><span /><span /><span /></div>
-                <span>TRANSMISSÃO AO VIVO</span>
-                <Radio size={14} />
-              </div>
-              <div className="stream-canvas">
-                <div className="screen-orbit orbit-one" />
-                <div className="screen-orbit orbit-two" />
-                <ScreenShare size={74} strokeWidth={1.1} />
-              </div>
-              <div className="stream-footer">
-                <div><span className="live-dot" /> 1080p · 60 FPS</div>
-                <div className="viewer-faces"><span>G</span><span>V</span><span>+3</span></div>
-              </div>
+            <div className="constellation-orbit orbit-outer" />
+            <div className="constellation-orbit orbit-inner" />
+            <ParticleField particles={CONSTELLATION_PARTICLES} className="particle-brain" />
+            <span className="constellation-note note-top">ROTA PRIVADA</span>
+            <span className="constellation-note note-bottom"><span className="status-dot" /> 1440P · 60 FPS</span>
+            <div className="constellation-core">
+              <ScreenShare size={26} strokeWidth={1.4} />
             </div>
           </div>
         </section>
@@ -528,6 +557,7 @@ function App() {
       {view === "host-setup" && (
         <section className="workspace page-enter">
           <PageHeading
+            kicker="Nova transmissão"
             title="O que você quer mostrar?"
             subtitle="Escolha um monitor ou uma janela. Você confere a prévia antes de transmitir."
             onBack={leaveSession}
@@ -545,7 +575,7 @@ function App() {
             <div className="source-panel panel">
               <div className="panel-heading">
                 <div><span className="step">01</span><h2>Tela ou janela</h2></div>
-                <button className="icon-button" onClick={() => void loadSources()} title="Atualizar fontes">
+                <button className="icon-button" onClick={() => void loadSources()} title="Atualizar fontes" aria-label="Atualizar telas e janelas">
                   <RefreshCw size={16} className={sourcesLoading ? "spin" : ""} />
                 </button>
               </div>
@@ -559,6 +589,7 @@ function App() {
                       key={source.id}
                       className={`source-card ${selectedSourceId === source.id ? "selected" : ""}`}
                       onClick={() => setSelectedSourceId(source.id)}
+                      aria-pressed={selectedSourceId === source.id}
                     >
                       <div className="source-preview">
                         <img src={source.thumbnail} alt="" />
@@ -577,12 +608,14 @@ function App() {
             <aside className="setup-sidebar">
               <div className="panel compact-panel">
                 <div className="panel-heading"><div><span className="step">02</span><h2>Qualidade</h2></div></div>
-                <div className="quality-list">
+                <div className="quality-list" role="radiogroup" aria-label="Qualidade da transmissão">
                   {QUALITY_PRESETS.map((preset) => (
                     <button
                       key={preset.key}
                       className={`quality-option ${qualityKey === preset.key ? "selected" : ""}`}
                       onClick={() => setQualityKey(preset.key)}
+                      role="radio"
+                      aria-checked={qualityKey === preset.key}
                     >
                       <span className="radio-ring"><span /></span>
                       <span><strong>{preset.label}</strong><small>{preset.detail}</small></span>
@@ -600,6 +633,7 @@ function App() {
                     onClick={() => setWithSystemAudio((value) => !value)}
                     role="switch"
                     aria-checked={withSystemAudio}
+                    aria-label="Transmitir áudio do computador"
                   ><span /></button>
                 </div>
               </div>
@@ -615,7 +649,7 @@ function App() {
 
       {view === "viewer-join" && (
         <section className="join-page page-enter">
-          <PageHeading title="Entrar em uma sala" subtitle="Cole o código que seu amigo enviou para você." onBack={leaveSession} />
+          <PageHeading kicker="Convite privado" title="Entrar em uma sala" subtitle="Cole o código que seu amigo enviou para você." onBack={leaveSession} />
           <div className="join-card panel">
             <div className="join-icon"><Link2 size={28} /></div>
             <label htmlFor="room-code">Código da sala</label>
@@ -663,13 +697,13 @@ function App() {
                 <button className="room-code-copy" onClick={() => void copyInvite()}>
                   <span>{roomCode}</span>{copied ? <Check size={18} /> : <Copy size={18} />}
                 </button>
-                <button className="button button-secondary copy-button" onClick={() => void copyInvite()}>
+                <button className="button button-primary copy-button" onClick={() => void copyInvite()}>
                   {copied ? <><Check size={16} /> Copiado</> : <><Clipboard size={16} /> Copiar código</>}
                 </button>
               </div>
 
               <div className="panel session-card">
-                <div className="session-status">
+                <div className="session-status" aria-live="polite">
                   <span className="signal-icon"><Radio size={16} /></span>
                   <span><strong>{connectionState}</strong><small>{viewerCount} {viewerCount === 1 ? "pessoa assistindo" : "pessoas assistindo"}</small></span>
                 </div>
@@ -690,7 +724,7 @@ function App() {
           <div className="watch-toolbar">
             <button className="button button-secondary" onClick={leaveSession}><ArrowLeft size={16} /> Sair</button>
             <div className="watch-room"><span>{roomCode}</span><span className="status-dot" /> {connectionState}</div>
-            <button className="button button-secondary" onClick={() => viewerStageRef.current?.requestFullscreen()}>
+            <button className="button button-primary" onClick={() => viewerStageRef.current?.requestFullscreen()}>
               <Expand size={16} /> Tela cheia
             </button>
           </div>
@@ -715,11 +749,40 @@ function App() {
   );
 }
 
-function PageHeading({ title, subtitle, onBack }: { title: string; subtitle: string; onBack: () => void }) {
+function ParticleField({
+  particles,
+  className,
+}: {
+  particles: typeof CONSTELLATION_PARTICLES;
+  className: string;
+}) {
+  return (
+    <div className={className} aria-hidden="true">
+      {particles.map((particle, index) => (
+        <span
+          key={index}
+          className="triangle-particle"
+          style={{
+            "--particle-x": `${particle.x}%`,
+            "--particle-y": `${particle.y}%`,
+            "--particle-size": `${particle.size}px`,
+            "--particle-rotation": `${particle.rotation}deg`,
+            "--particle-color": particle.color,
+            "--particle-delay": `${particle.delay}s`,
+            "--particle-duration": `${particle.duration}s`,
+            "--particle-opacity": particle.opacity,
+          } as CSSProperties}
+        >△</span>
+      ))}
+    </div>
+  );
+}
+
+function PageHeading({ kicker, title, subtitle, onBack }: { kicker: string; title: string; subtitle: string; onBack: () => void }) {
   return (
     <div className="page-heading">
       <button className="icon-button back-button" onClick={onBack} aria-label="Voltar"><ArrowLeft size={18} /></button>
-      <div><h1>{title}</h1><p>{subtitle}</p></div>
+      <div><span className="page-kicker">{kicker}</span><h1>{title}</h1><p>{subtitle}</p></div>
     </div>
   );
 }
@@ -736,7 +799,7 @@ function ErrorBanner({
   onAction?: () => void;
 }) {
   return (
-    <div className={`error-banner ${compact ? "compact" : ""}`}>
+    <div className={`error-banner ${compact ? "compact" : ""}`} role="alert">
       <X size={16} />
       <span>{message}</span>
       {actionLabel && onAction && <button onClick={onAction}>{actionLabel}</button>}

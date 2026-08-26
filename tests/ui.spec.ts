@@ -15,7 +15,7 @@ const mockDesktop = async (
 
     Object.defineProperty(window, "telaDesktop", {
       value: {
-        getVersion: async () => "0.3.1-test",
+        getVersion: async () => "0.4.0-test",
         getPlatform: async () => desktopPlatform,
         getCapturePermission: async () => permission,
         openCaptureSettings: async () => {
@@ -79,8 +79,21 @@ test("carrega a tela inicial e abre a configuração do anfitrião", async ({ pa
   await page.getByRole("button", { name: /Compartilhar minha tela/i }).click();
   await expect(page.getByRole("heading", { name: /O que você quer mostrar/i })).toBeVisible();
   await expect(page.getByText("Tela principal", { exact: true })).toBeVisible();
+  await expect(page.locator(".source-card").first()).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("radio", { name: /Cinema/i })).toHaveAttribute("aria-checked", "true");
   await expect(page.getByRole("button", { name: /Iniciar transmissão/i })).toBeEnabled();
   expect(errors).toEqual([]);
+});
+
+test("mantém a home utilizável na menor janela suportada", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 640 });
+  await mockDesktop(page);
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: /Sua tela/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Compartilhar minha tela/i })).toBeVisible();
+  const dimensions = await page.evaluate(() => ({ viewport: window.innerWidth, content: document.documentElement.scrollWidth }));
+  expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport);
 });
 
 test("orienta a liberar gravação de tela quando o macOS bloqueia a captura", async ({ page }) => {
