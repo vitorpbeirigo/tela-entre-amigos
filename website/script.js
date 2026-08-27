@@ -24,7 +24,10 @@ function preferredDownload() {
 async function loadLatestRelease() {
   const status = document.querySelector(".release-status");
   try {
-    const response = await fetch(RELEASE_API, { headers: { Accept: "application/vnd.github+json" } });
+    const response = await fetch(RELEASE_API, {
+      cache: "no-store",
+      headers: { Accept: "application/vnd.github+json" },
+    });
     if (!response.ok) throw new Error(`GitHub respondeu ${response.status}`);
     const release = await response.json();
     for (const asset of release.assets || []) {
