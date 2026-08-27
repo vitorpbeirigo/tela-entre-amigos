@@ -7,8 +7,9 @@ const mockDesktop = async (
   capturePermission: "not-determined" | "granted" | "denied" | "restricted" | "unknown" = "granted",
   connectionState: ConnectionPermissionState = "allowed",
   connectionDelayMs = 0,
+  requestedConnectionState: ConnectionPermissionState = "allowed",
 ) => {
-  await page.addInitScript(({ updateStatus, desktopPlatform, permission, initialConnectionState, permissionDelay }) => {
+  await page.addInitScript(({ updateStatus, desktopPlatform, permission, initialConnectionState, permissionDelay, permissionResult }) => {
     const thumbnail =
       "data:image/svg+xml," +
       encodeURIComponent(
@@ -31,7 +32,7 @@ const mockDesktop = async (
         },
         requestConnectionPermission: async () => {
           sessionStorage.setItem("connection-permission-requested", "true");
-          return { state: desktopPlatform === "win32" ? "allowed" : "requested" };
+          return { state: desktopPlatform === "win32" ? permissionResult : "requested" };
         },
         openConnectionSettings: async () => {
           sessionStorage.setItem("connection-settings-opened", "true");
@@ -94,7 +95,7 @@ const mockDesktop = async (
         return stream;
       },
     });
-  }, { updateStatus: initialUpdateStatus, desktopPlatform: platform, permission: capturePermission, initialConnectionState: connectionState, permissionDelay: connectionDelayMs });
+  }, { updateStatus: initialUpdateStatus, desktopPlatform: platform, permission: capturePermission, initialConnectionState: connectionState, permissionDelay: connectionDelayMs, permissionResult: requestedConnectionState });
 };
 
 test("carrega a tela inicial e abre a configuração do anfitrião", async ({ page }) => {
@@ -173,6 +174,18 @@ test("continua a ação automaticamente quando a checagem do Firewall termina", 
 
   await expect(page.getByRole("heading", { name: /O que você quer mostrar/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Libere a conexão direta." })).toHaveCount(0);
+});
+
+test("permite continuar quando o Windows não consegue confirmar o Firewall", async ({ page }) => {
+  await mockDesktop(page, undefined, "win32", "granted", "missing", 0, "unavailable");
+  await page.goto("/");
+  await page.getByRole("button", { name: "Agora não" }).click();
+  await page.getByRole("button", { name: /Compartilhar minha tela/i }).click();
+  await page.getByRole("button", { name: "Permitir conexão" }).click();
+
+  await expect(page.getByText(/O Windows não confirmou a alteração/i)).toBeVisible();
+  await page.getByRole("button", { name: "Continuar mesmo assim" }).click();
+  await expect(page.getByRole("heading", { name: /O que você quer mostrar/i })).toBeVisible();
 });
 
 test("valida o código de uma sala antes de conectar", async ({ page }) => {

@@ -277,9 +277,11 @@ function App() {
 
   const closePermissionGuide = useCallback(() => {
     localStorage.setItem("infinity-permissions-v1-seen", "1");
+    const pendingAction = pendingPermissionActionRef.current;
     pendingPermissionActionRef.current = null;
     setPermissionNotice("");
     setShowPermissionGuide(false);
+    pendingAction?.();
   }, []);
 
   const requestConnectionPermission = useCallback(async () => {
@@ -299,7 +301,7 @@ function App() {
       } else if (result.state === "cancelled") {
         setPermissionNotice("A autorização foi cancelada. O Infinity não alterou o Firewall.");
       } else {
-        setPermissionNotice("Não foi possível confirmar a permissão. Abra os ajustes do sistema e permita o Infinity.");
+        setPermissionNotice("O Windows não confirmou a alteração. Você ainda pode continuar e testar a conexão.");
       }
     } catch {
       setPermissionNotice("Não foi possível abrir a solicitação do sistema.");
@@ -1099,7 +1101,9 @@ function App() {
                   <button className="button button-primary" disabled={Boolean(permissionBusy)} onClick={() => void requestConnectionPermission()}>
                     {permissionBusy === "connection" ? <><LoaderCircle className="spin" size={17} /> Aguardando o Windows…</> : <><ShieldCheck size={17} /> Permitir conexão</>}
                   </button>
-                  <button className="button button-ghost" disabled={Boolean(permissionBusy)} onClick={closePermissionGuide}>Agora não</button>
+                  <button className="button button-ghost" disabled={Boolean(permissionBusy)} onClick={closePermissionGuide}>
+                    {pendingPermissionActionRef.current ? "Continuar mesmo assim" : "Agora não"}
+                  </button>
                 </div>
                 <small>O Infinity não desativa o Firewall e não abre portas para outros programas.</small>
               </>

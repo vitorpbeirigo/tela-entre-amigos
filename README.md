@@ -15,8 +15,8 @@ O anfitrião escolhe entre 720p30, 1080p30, 1080p60 e 1440p60. A qualidade pode 
 
 ## Instalar no macOS
 
-- `Infinity-0.9.4-mac-arm64.dmg`: Apple Silicon (M1, M2, M3, M4 ou mais novo).
-- `Infinity-0.9.4-mac-x64.dmg`: Macs Intel.
+- `Infinity-0.9.5-mac-arm64.dmg`: Apple Silicon (M1, M2, M3, M4 ou mais novo).
+- `Infinity-0.9.5-mac-x64.dmg`: Macs Intel.
 - Recomendado: macOS 13 ou mais recente para capturar o áudio do sistema sem driver virtual.
 
 Esta edição gratuita usa assinatura ad hoc local, sem certificado Developer ID e sem notarização paga da Apple. Por isso o macOS pode bloquear a primeira abertura mesmo sem ter detectado malware.
@@ -67,14 +67,14 @@ Gerar o instalador Windows:
 npm.cmd run build
 ```
 
-O arquivo é criado em `artifacts/Infinity-Setup-0.9.4.exe`, junto de `latest.yml` e `.blockmap`. Os pacotes macOS são gerados pelo GitHub Actions ou num Mac com `npm run build:mac`.
+O arquivo é criado em `artifacts/Infinity-Setup-0.9.5.exe`, junto de `latest.yml` e `.blockmap`. Os pacotes macOS são gerados pelo GitHub Actions ou num Mac com `npm run build:mac`.
 
 ## Publicar
 
 ```powershell
 git push origin main
-git tag v0.9.4
-git push origin v0.9.4
+git tag v0.9.5
+git push origin v0.9.5
 ```
 
 O workflow **Build Infinity installers** gera Windows x64, macOS Intel e macOS Apple Silicon e publica os arquivos na Release. O workflow **Deploy Infinity website** publica a pasta `website/` no GitHub Pages.

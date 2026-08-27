@@ -230,7 +230,10 @@ try {
       logEvent("firewall-permission-denied", { cancelled, message: message.slice(0, 300) });
       return { state: cancelled ? "cancelled" : "failed" };
     }
-    const status = await getWindowsFirewallStatus();
+    const verification = await getWindowsFirewallStatus();
+    const status = verification.state === "allowed" || verification.state === "blocked"
+      ? verification
+      : { ...verification, state: "allowed", verificationState: verification.state };
     logEvent("firewall-permission-result", status);
     return status;
   } catch (error) {

@@ -30,6 +30,7 @@ type ConnectionPermissionState = "allowed" | "blocked" | "missing" | "unavailabl
 
 interface ConnectionPermissionStatus {
   state: ConnectionPermissionState;
+  verificationState?: ConnectionPermissionState;
   blockedRules?: number;
   allowedRules?: number;
   matchingAllowedRules?: number;
