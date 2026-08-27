@@ -1,5 +1,4 @@
-const RELEASE_API = "https://api.github.com/repos/vitorpbeirigo/tela-entre-amigos/releases/latest";
-const RELEASE_PAGE = "https://github.com/vitorpbeirigo/tela-entre-amigos/releases/latest";
+const RELEASE_API = "/api/releases";
 
 const assetLinks = {
   windows: document.querySelector('[data-asset="windows"]'),
@@ -46,8 +45,7 @@ async function loadLatestRelease() {
       smartLink.querySelector("span").textContent = "Baixar para Windows";
     }
   } catch (error) {
-    status.textContent = "Abra a página de versões para escolher o instalador.";
-    Object.values(assetLinks).forEach((link) => { if (link) link.href = RELEASE_PAGE; });
+    status.textContent = "Os botões continuam disponíveis para buscar o instalador mais recente.";
   }
 }
 

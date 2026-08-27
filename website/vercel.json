@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/baixar/:platform",
+      "destination": "/api/releases?platform=:platform"
+    }
+  ]
+}
