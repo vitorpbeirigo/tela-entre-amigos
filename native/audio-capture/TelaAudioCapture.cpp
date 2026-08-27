@@ -270,7 +270,7 @@ void PrintFailure(const wchar_t* phase, HRESULT hr)
 
 } // namespace
 
-int wmain()
+int wmain(int argc, wchar_t* argv[])
 {
     _setmode(_fileno(stdout), _O_BINARY);
     setvbuf(stdout, nullptr, _IONBF, 0);
@@ -281,6 +281,16 @@ int wmain()
     {
         PrintFailure(L"CoInitializeEx", hr);
         return 1;
+    }
+
+    HANDLE parentProcess = nullptr;
+    if (argc >= 2)
+    {
+        const DWORD parentPid = static_cast<DWORD>(wcstoul(argv[1], nullptr, 10));
+        if (parentPid != 0)
+        {
+            parentProcess = OpenProcess(SYNCHRONIZE, FALSE, parentPid);
+        }
     }
 
     int exitCode = 0;
@@ -312,7 +322,9 @@ int wmain()
         bool restartForDiscord = false;
         while (!g_stopRequested)
         {
-            const DWORD waitResult = WaitForSingleObject(capture->SamplesReadyEvent(), 100);
+            HANDLE waitHandles[] = { capture->SamplesReadyEvent(), parentProcess };
+            const DWORD handleCount = parentProcess ? 2 : 1;
+            const DWORD waitResult = WaitForMultipleObjects(handleCount, waitHandles, FALSE, 100);
             if (waitResult == WAIT_OBJECT_0)
             {
                 hr = capture->DrainSamples();
@@ -323,6 +335,11 @@ int wmain()
                     exitCode = HRESULT_CODE(hr) == ERROR_BROKEN_PIPE ? 0 : 1;
                     break;
                 }
+            }
+            else if (parentProcess && waitResult == WAIT_OBJECT_0 + 1)
+            {
+                g_stopRequested = true;
+                break;
             }
             else if (waitResult != WAIT_TIMEOUT)
             {
@@ -349,6 +366,7 @@ int wmain()
         if (!restartForDiscord) break;
     }
 
+    if (parentProcess) CloseHandle(parentProcess);
     CoUninitialize();
     return exitCode;
 }

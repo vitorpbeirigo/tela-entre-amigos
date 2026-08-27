@@ -40,6 +40,7 @@ interface Window {
     openCaptureSettings(): Promise<boolean>;
     copyText(value: string): Promise<boolean>;
     getTurnServers(): Promise<TurnServerConfig[]>;
+    logEvent(name: string, details?: Record<string, string | number | boolean>): void;
     checkForUpdates(): Promise<{ state: string }>;
     installUpdate(): Promise<boolean>;
     onUpdateStatus(callback: (status: UpdateStatus) => void): () => void;

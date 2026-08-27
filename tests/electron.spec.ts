@@ -1,4 +1,5 @@
 import { _electron as electron, expect, test } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
@@ -11,6 +12,15 @@ const launchTela = (profile: string) => {
       ? { executablePath: packagedExecutable, args: [`--user-data-dir=${path.join(os.tmpdir(), profile)}`] }
       : { args: [path.resolve("."), `--user-data-dir=${path.join(os.tmpdir(), profile)}`], cwd: path.resolve(".") },
   );
+};
+
+const isAudioHelperRunning = () => {
+  if (process.platform !== "win32") return false;
+  const output = execFileSync("tasklist.exe", ["/FI", "IMAGENAME eq TelaAudioCapture.exe", "/FO", "CSV", "/NH"], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  return output.toLowerCase().includes("telaaudiocapture.exe");
 };
 
 test("o aplicativo Electron lista fontes reais e inicia a captura", async () => {
@@ -31,6 +41,8 @@ test("o aplicativo Electron lista fontes reais e inicia a captura", async () => 
 
     await window.getByRole("button", { name: /Iniciar transmissão/i }).click();
     await expect(window.getByRole("heading", { name: /Sua tela está sendo compartilhada/i })).toBeVisible({ timeout: 15_000 });
+    await expect(window.getByText("Prévia pausada", { exact: true })).toBeVisible();
+    await window.getByRole("button", { name: "Mostrar prévia" }).click();
     await expect.poll(async () =>
       window.locator(".video-panel video").evaluate((video: HTMLVideoElement) =>
         (video.srcObject as MediaStream | null)?.getAudioTracks().length ?? 0,
@@ -44,6 +56,9 @@ test("o aplicativo Electron lista fontes reais e inicia a captura", async () => 
     expect(errors).toEqual([]);
   } finally {
     await app.close();
+    if (process.platform === "win32") {
+      await expect.poll(isAudioHelperRunning, { timeout: 5_000 }).toBe(false);
+    }
   }
 });
 
@@ -72,5 +87,8 @@ test("dois processos Electron conectam anfitrião e espectador", async () => {
     ).toBe(true);
   } finally {
     await Promise.allSettled([hostApp.close(), viewerApp.close()]);
+    if (process.platform === "win32") {
+      await expect.poll(isAudioHelperRunning, { timeout: 5_000 }).toBe(false);
+    }
   }
 });

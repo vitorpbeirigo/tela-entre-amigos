@@ -10,6 +10,31 @@ let mainWindow;
 let selectedSourceId = null;
 let audioCaptureProcess = null;
 let turnCache = { expiresAt: 0, servers: [] };
+let logFilePath = null;
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) app.quit();
+
+function logEvent(event, details = {}) {
+  const record = JSON.stringify({ timestamp: new Date().toISOString(), event, ...details });
+  console.log(record);
+  if (logFilePath) fs.appendFile(logFilePath, `${record}\n`, () => undefined);
+}
+
+function initializeLogging() {
+  const logsDirectory = app.getPath("logs");
+  fs.mkdirSync(logsDirectory, { recursive: true });
+  logFilePath = path.join(logsDirectory, "tela.log");
+  logEvent("app-ready", {
+    version: app.getVersion(),
+    pid: process.pid,
+    platform: process.platform,
+  });
+  const gpuStatusTimer = setTimeout(() => {
+    logEvent("gpu-status", { gpu: app.getGPUFeatureStatus() });
+  }, 3_000);
+  gpuStatusTimer.unref();
+}
 
 const NETWORK_CONFIG_URL =
   "https://raw.githubusercontent.com/vitorpbeirigo/tela-entre-amigos/main/network.json";
@@ -122,7 +147,18 @@ function getAudioCaptureExecutable() {
 function stopDiscordFilteredAudio() {
   const child = audioCaptureProcess;
   audioCaptureProcess = null;
-  if (child && !child.killed) child.kill();
+  if (!child || child.exitCode !== null) return;
+
+  logEvent("audio-helper-stop", { pid: child.pid });
+  child.kill("SIGTERM");
+  const forceKill = setTimeout(() => {
+    if (child.exitCode === null) {
+      logEvent("audio-helper-force-stop", { pid: child.pid });
+      child.kill("SIGKILL");
+    }
+  }, 1_000);
+  forceKill.unref();
+  child.once("exit", () => clearTimeout(forceKill));
 }
 
 function startDiscordFilteredAudio() {
@@ -137,11 +173,12 @@ function startDiscordFilteredAudio() {
   }
 
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, [], {
+    const child = spawn(executable, [String(process.pid)], {
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
     audioCaptureProcess = child;
+    logEvent("audio-helper-start", { pid: child.pid, parentPid: process.pid });
     let ready = false;
     let stderrBuffer = "";
 
@@ -186,12 +223,14 @@ function startDiscordFilteredAudio() {
     child.once("error", (error) => {
       clearTimeout(startupTimeout);
       if (child === audioCaptureProcess) audioCaptureProcess = null;
+      logEvent("audio-helper-error", { pid: child.pid, message: error.message });
       if (!ready) reject(new Error(`Não foi possível abrir o áudio seletivo: ${error.message}`));
     });
 
     child.once("exit", (code) => {
       clearTimeout(startupTimeout);
       if (child === audioCaptureProcess) audioCaptureProcess = null;
+      logEvent("audio-helper-exit", { pid: child.pid, code });
       if (!ready) {
         reject(new Error(`O áudio seletivo foi encerrado antes de iniciar (código ${code ?? "desconhecido"}).`));
       } else if (code && mainWindow && !mainWindow.isDestroyed()) {
@@ -221,6 +260,16 @@ function createWindow() {
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    logEvent("renderer-gone", { reason: details.reason, exitCode: details.exitCode });
+    stopDiscordFilteredAudio();
+  });
+
+  mainWindow.on("close", stopDiscordFilteredAudio);
+  mainWindow.on("closed", () => {
+    stopDiscordFilteredAudio();
+    mainWindow = null;
+  });
 
   mainWindow.once("ready-to-show", () => mainWindow.show());
 
@@ -232,6 +281,8 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (!hasSingleInstanceLock) return;
+  initializeLogging();
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
     const isMainWindow = webContents === mainWindow?.webContents;
     const isExpectedPermission = ["media", "display-capture", "fullscreen"].includes(permission);
@@ -307,6 +358,12 @@ app.whenReady().then(() => {
     if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
     return getTurnServers();
   });
+  ipcMain.on("diagnostics:event", (event, name, details) => {
+    if (event.sender !== mainWindow?.webContents) return;
+    if (typeof name !== "string" || name.length > 80) return;
+    const safeDetails = details && typeof details === "object" ? details : {};
+    logEvent(`renderer:${name}`, safeDetails);
+  });
   ipcMain.handle("update:check", async (event) => {
     if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
     if (!app.isPackaged) return { state: "development" };
@@ -328,6 +385,16 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+if (hasSingleInstanceLock) {
+  app.on("second-instance", () => {
+    logEvent("second-instance-blocked");
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+}
 
 app.on("window-all-closed", () => {
   stopDiscordFilteredAudio();

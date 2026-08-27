@@ -5,6 +5,8 @@ import {
   Clipboard,
   Copy,
   Download,
+  Eye,
+  EyeOff,
   Expand,
   Headphones,
   Link2,
@@ -35,7 +37,7 @@ import {
 
 type View = "home" | "host-setup" | "host-live" | "viewer-join" | "viewer-live";
 type Role = "host" | "viewer";
-type QualityKey = "cinema" | "smooth" | "extreme";
+type QualityKey = "performance" | "cinema" | "smooth" | "extreme";
 
 interface QualityPreset {
   key: QualityKey;
@@ -55,6 +57,15 @@ interface ConnectionStats {
 }
 
 const QUALITY_PRESETS: QualityPreset[] = [
+  {
+    key: "performance",
+    label: "Jogar",
+    detail: "720p · 30 FPS · 4 Mbps · menor uso da GPU",
+    width: 1280,
+    height: 720,
+    frameRate: 30,
+    maxBitrate: 4_000_000,
+  },
   {
     key: "cinema",
     label: "Cinema",
@@ -193,7 +204,7 @@ function App() {
   const [sources, setSources] = useState<CaptureSource[]>([]);
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [selectedSourceId, setSelectedSourceId] = useState<string>("");
-  const [qualityKey, setQualityKey] = useState<QualityKey>("cinema");
+  const [qualityKey, setQualityKey] = useState<QualityKey>("performance");
   const [roomCode, setRoomCode] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -202,10 +213,11 @@ function App() {
   const [connectionState, setConnectionState] = useState("Preparando");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [version, setVersion] = useState("0.6.0");
+  const [version, setVersion] = useState("0.7.0");
   const [platform, setPlatform] = useState<NodeJS.Platform | "">("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [viewerVolume, setViewerVolume] = useState(1);
+  const [showLocalPreview, setShowLocalPreview] = useState(false);
   const [stats, setStats] = useState<ConnectionStats>({
     bitrate: "—",
     resolution: "—",
@@ -242,8 +254,9 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (localVideoRef.current) localVideoRef.current.srcObject = localStream;
-  }, [localStream, view]);
+    if (!localVideoRef.current) return;
+    localVideoRef.current.srcObject = showLocalPreview ? localStream : null;
+  }, [localStream, showLocalPreview, view]);
 
   useEffect(() => {
     if (!remoteVideoRef.current) return;
@@ -353,7 +366,7 @@ function App() {
     if (!sender) return;
 
     const parameters = sender.getParameters();
-    parameters.degradationPreference = "maintain-resolution";
+    parameters.degradationPreference = quality.key === "performance" ? "maintain-framerate" : "balanced";
     parameters.encodings = parameters.encodings?.length ? parameters.encodings : [{}];
     parameters.encodings[0].maxBitrate = quality.maxBitrate;
     parameters.encodings[0].maxFramerate = quality.frameRate;
@@ -469,7 +482,12 @@ function App() {
   }, [configureVideoSender]);
 
   const cleanup = useCallback(() => {
-    roomRefs.current.forEach((room) => room.leave());
+    const hadActiveSession = Boolean(localStreamRef.current || remoteStreamRef.current || roomRefs.current.length);
+    roomRefs.current.forEach((room) => {
+      const peers = Object.values(room.getPeers()) as RTCPeerConnection[];
+      room.leave();
+      peers.forEach((peer) => peer.close());
+    });
     roomRefs.current = [];
     viewerRoomsRef.current.clear();
     hostSessionRef.current = null;
@@ -477,14 +495,24 @@ function App() {
     if (connectionTimeoutRef.current !== null) window.clearTimeout(connectionTimeoutRef.current);
     connectionTimeoutRef.current = null;
     stopFilteredAudio();
+    if (localVideoRef.current) {
+      localVideoRef.current.pause();
+      localVideoRef.current.srcObject = null;
+    }
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.pause();
+      remoteVideoRef.current.srcObject = null;
+    }
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     remoteStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
     remoteStreamRef.current = null;
     setLocalStream(null);
     setRemoteStream(null);
+    setShowLocalPreview(false);
     setViewerCount(0);
     setStats({ bitrate: "—", resolution: "—", fps: "—", latency: "—" });
+    if (hadActiveSession) window.telaDesktop.logEvent("capture-stop");
   }, [stopFilteredAudio]);
 
   useEffect(() => cleanup, [cleanup]);
@@ -548,7 +576,7 @@ function App() {
 
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
-        videoTrack.contentHint = quality.key === "cinema" ? "motion" : "detail";
+        videoTrack.contentHint = "motion";
         videoTrack.addEventListener("ended", () => cleanup(), { once: true });
       }
 
@@ -559,6 +587,13 @@ function App() {
       setRoomCode(code);
       setView("host-live");
       setConnectionState(turnServers.length ? "Sala aberta · TURN pronto" : "Sala aberta");
+      window.telaDesktop.logEvent("capture-start", {
+        quality: quality.key,
+        width: quality.width,
+        height: quality.height,
+        fps: quality.frameRate,
+        bitrate: quality.maxBitrate,
+      });
       joinP2PRoom("host", code, turnServers, stream);
     } catch (startError) {
       stream?.getTracks().forEach((track) => track.stop());
@@ -844,8 +879,19 @@ function App() {
 
           <div className="live-layout">
             <div className="video-panel panel">
-              <video ref={localVideoRef} autoPlay muted playsInline />
-              <div className="video-badge"><Radio size={13} /> Prévia local</div>
+              {showLocalPreview ? (
+                <video ref={localVideoRef} autoPlay muted playsInline />
+              ) : (
+                <div className="preview-paused">
+                  <EyeOff size={25} />
+                  <strong>Prévia pausada</strong>
+                  <span>Menos uso de GPU enquanto você joga.</span>
+                </div>
+              )}
+              <button className="video-badge preview-toggle" onClick={() => setShowLocalPreview((visible) => !visible)}>
+                {showLocalPreview ? <EyeOff size={13} /> : <Eye size={13} />}
+                {showLocalPreview ? "Ocultar prévia" : "Mostrar prévia"}
+              </button>
             </div>
             <aside className="live-sidebar">
               <div className="invite-card panel">

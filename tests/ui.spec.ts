@@ -15,7 +15,7 @@ const mockDesktop = async (
 
     Object.defineProperty(window, "telaDesktop", {
       value: {
-        getVersion: async () => "0.6.0-test",
+        getVersion: async () => "0.7.0-test",
         getPlatform: async () => desktopPlatform,
         getCapturePermission: async () => permission,
         openCaptureSettings: async () => {
@@ -42,6 +42,7 @@ const mockDesktop = async (
           return true;
         },
         getTurnServers: async () => [],
+        logEvent: () => undefined,
         checkForUpdates: async () => ({ state: "development" }),
         installUpdate: async () => {
           sessionStorage.setItem("update-installed", "true");
@@ -84,7 +85,7 @@ test("carrega a tela inicial e abre a configuração do anfitrião", async ({ pa
   await expect(page.getByRole("heading", { name: /O que você quer mostrar/i })).toBeVisible();
   await expect(page.getByText("Tela principal", { exact: true })).toBeVisible();
   await expect(page.locator(".source-card").first()).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("radio", { name: /Cinema/i })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("radio", { name: /Jogar/i })).toHaveAttribute("aria-checked", "true");
   await expect(page.getByText("Áudio sem Discord", { exact: true })).toBeVisible();
   await expect(page.getByRole("switch")).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Iniciar transmissão/i })).toBeEnabled();
@@ -148,6 +149,10 @@ test("copia o código da sala usando a ponte nativa", async ({ page }) => {
   await expect(page.locator(".source-card").first()).toBeVisible();
   await page.getByRole("button", { name: /Iniciar transmissão/i }).click();
   const code = (await page.locator(".room-code-copy span").textContent())!.trim();
+
+  await expect(page.getByText("Prévia pausada", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Mostrar prévia" }).click();
+  await expect(page.locator(".video-panel video")).toBeVisible();
 
   await page.getByRole("button", { name: /Copiar código/i }).click();
 

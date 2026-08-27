@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld("telaDesktop", {
   openCaptureSettings: () => ipcRenderer.invoke("capture:open-settings"),
   copyText: (value) => ipcRenderer.invoke("clipboard:write-text", value),
   getTurnServers: () => ipcRenderer.invoke("network:get-turn-servers"),
+  logEvent: (name, details) => ipcRenderer.send("diagnostics:event", name, details),
   checkForUpdates: () => ipcRenderer.invoke("update:check"),
   installUpdate: () => ipcRenderer.invoke("update:install"),
   onUpdateStatus: (callback) => {

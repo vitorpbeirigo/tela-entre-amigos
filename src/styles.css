@@ -294,6 +294,12 @@ button:focus-visible, input:focus-visible {
 .video-panel { position: relative; min-height: 0; aspect-ratio: 16 / 9; overflow: hidden; display: grid; place-items: center; border-radius: var(--radius); background: #030303; }
 .video-panel video { width: 100%; height: 100%; object-fit: contain; }
 .video-badge { position: absolute; top: 14px; left: 14px; padding: 8px 11px; display: flex; align-items: center; gap: 7px; border-radius: 18px; background: rgba(0, 0, 0, .72); color: var(--color-ash-gray); font-size: 11px; backdrop-filter: blur(10px); }
+.preview-paused { display: grid; justify-items: center; gap: 8px; color: var(--color-ash-gray); text-align: center; }
+.preview-paused svg { color: var(--color-deep-verdant); }
+.preview-paused strong { color: var(--color-silver-mist); font-size: 15px; font-weight: 500; }
+.preview-paused span { font-size: 12px; }
+.preview-toggle { border: 1px solid rgba(255, 255, 255, .09); cursor: pointer; }
+.preview-toggle:hover { color: white; background: rgba(20, 20, 20, .9); }
 .live-sidebar { display: grid; align-content: start; gap: 46px; }
 .invite-card, .session-card { padding: 4px 0; }
 .invite-card h2 { margin: 14px 0 8px; font-size: 27px; line-height: 1; font-weight: 400; letter-spacing: -.035em; }
