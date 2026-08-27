@@ -32,6 +32,9 @@ test("o aplicativo Electron lista fontes reais e inicia a captura", async () => 
     window.on("pageerror", (error) => errors.push(error.message));
 
     await expect(window.getByRole("heading", { name: /Sua tela/i })).toBeVisible();
+    expect(await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]?.webContents.getLastWebPreferences().sandbox,
+    )).toBe(true);
     await window.getByRole("button", { name: /Compartilhar minha tela/i }).click();
     await expect(window.getByRole("heading", { name: /O que você quer mostrar/i })).toBeVisible();
 
@@ -78,9 +81,12 @@ test("dois processos Electron conectam anfitrião e espectador", async () => {
     const code = (await host.locator(".room-code-copy span").textContent())!.trim();
 
     await viewer.getByRole("button", { name: /Entrar em uma sala/i }).click();
+    await viewer.getByLabel("Seu nome").fill("Amigo Electron");
     await viewer.getByLabel("Código da sala").fill(code);
     await viewer.getByRole("button", { name: /Assistir agora/i }).click();
 
+    await expect(host.getByText("Amigo Electron", { exact: true })).toBeVisible({ timeout: 35_000 });
+    await host.getByRole("button", { name: "Permitir Amigo Electron" }).click();
     await expect(viewer.locator(".watch-room")).toContainText("Conectado", { timeout: 35_000 });
     await expect.poll(async () =>
       viewer.locator(".viewer-stage video").evaluate((video: HTMLVideoElement) => Boolean(video.srcObject)),

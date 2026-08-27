@@ -23,9 +23,9 @@
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; min-width: 760px; min-height: 100%; margin: 0; }
 body { min-height: 100vh; overflow-x: hidden; background: var(--color-void); }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button { color: inherit; }
-button:focus-visible, input:focus-visible {
+button:focus-visible, input:focus-visible, select:focus-visible {
   outline: 2px solid var(--color-electric-iris);
   outline-offset: 4px;
 }
@@ -277,6 +277,7 @@ button:focus-visible, input:focus-visible {
 .join-card label { display: block; margin: 0 0 11px 18px; color: var(--color-saffron-spark); font-size: 11px; font-weight: 600; text-align: left; text-transform: uppercase; letter-spacing: .1em; }
 .room-input { width: 100%; height: 66px; padding: 0 20px; border: 0; border-radius: var(--radius); background: var(--surface-functional); color: white; font: 18px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .09em; text-align: center; text-transform: uppercase; caret-color: var(--color-electric-iris); }
 .room-input::placeholder { color: #565656; }
+.name-input { height: 54px; margin-bottom: 18px; font: 15px Inter Variable, Inter, sans-serif; letter-spacing: 0; text-align: left; text-transform: none; }
 .join-button { width: 100%; min-height: 52px; margin: 15px 0 20px; }
 
 .error-banner { min-height: 48px; margin: 0 0 22px; padding: 11px 15px; display: flex; align-items: center; gap: 10px; border: 0; border-radius: var(--radius); background: rgba(255, 111, 125, .11); color: #ffadb5; font-size: 13px; }
@@ -300,13 +301,38 @@ button:focus-visible, input:focus-visible {
 .preview-paused span { font-size: 12px; }
 .preview-toggle { border: 1px solid rgba(255, 255, 255, .09); cursor: pointer; }
 .preview-toggle:hover { color: white; background: rgba(20, 20, 20, .9); }
-.live-sidebar { display: grid; align-content: start; gap: 46px; }
+.live-sidebar { display: grid; align-content: start; gap: 34px; }
 .invite-card, .session-card { padding: 4px 0; }
 .invite-card h2 { margin: 14px 0 8px; font-size: 27px; line-height: 1; font-weight: 400; letter-spacing: -.035em; }
 .invite-card p { margin: 0 0 20px; color: var(--color-ash-gray); font-size: 13px; line-height: 1.55; }
 .room-code-copy { width: 100%; min-height: 54px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; border: 0; border-radius: var(--radius); background: var(--surface-functional); color: white; font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .04em; cursor: pointer; }
 .room-code-copy:hover { background: var(--surface-hover); }
 .copy-button { width: 100%; margin-top: 10px; }
+.sidebar-heading { min-height: 22px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.live-quality-card, .participants-card { padding: 4px 0; }
+.live-quality-card label { display: block; margin: 12px 0 8px; color: var(--color-silver-mist); font-size: 13px; }
+.live-quality-card select { width: 100%; height: 46px; padding: 0 34px 0 12px; border: 1px solid rgba(255, 255, 255, .08); border-radius: var(--radius); background: var(--surface-functional); color: white; cursor: pointer; }
+.live-quality-card select:disabled { cursor: progress; opacity: .65; }
+.live-quality-card option { color: white; background: #171719; }
+.live-quality-card p { min-height: 31px; margin: 9px 0 0; color: var(--color-ash-gray); font-size: 11px; line-height: 1.45; }
+.quality-pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 12px rgba(102, 212, 157, .45); }
+.quality-pulse.active { background: var(--color-saffron-spark); animation: pulse 800ms ease-in-out infinite alternate; }
+.participant-total { min-width: 23px; height: 23px; padding: 0 7px; display: inline-grid; place-items: center; border-radius: 12px; background: rgba(128, 82, 255, .14); color: #c6b8ff; font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.participants-empty { min-height: 52px; margin-top: 8px; display: flex; align-items: center; gap: 9px; color: var(--color-ash-gray); font-size: 12px; }
+.participant-list { margin-top: 8px; display: grid; gap: 6px; }
+.participant-row { min-height: 52px; padding: 7px 8px; display: flex; align-items: center; gap: 9px; border-radius: var(--radius); background: rgba(255, 255, 255, .025); }
+.participant-row.pending { background: rgba(255, 184, 41, .065); }
+.participant-avatar { width: 33px; height: 33px; flex: none; display: grid; place-items: center; border-radius: 50%; background: rgba(128, 82, 255, .16); color: #c6b8ff; font-size: 12px; font-weight: 600; }
+.participant-name { min-width: 0; flex: 1; }
+.participant-name strong, .participant-name small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.participant-name strong { color: var(--color-silver-mist); font-size: 12px; font-weight: 500; }
+.participant-name small { margin-top: 3px; color: var(--color-ash-gray); font-size: 10px; }
+.participant-actions { display: flex; align-items: center; gap: 5px; }
+.participant-actions button, .participant-row > button { width: 31px; height: 31px; flex: none; display: grid; place-items: center; border: 0; border-radius: 50%; cursor: pointer; }
+.participant-allow { color: #9be4bd; background: rgba(102, 212, 157, .1); }
+.participant-allow:hover { background: rgba(102, 212, 157, .2); }
+.participant-deny { color: #ff9da6; background: rgba(255, 111, 125, .08); }
+.participant-deny:hover { background: rgba(255, 111, 125, .16); }
 .session-status { padding-bottom: 22px; display: flex; align-items: center; gap: 12px; }
 .signal-icon { color: var(--color-success); background: rgba(102, 212, 157, .1); }
 .stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px 14px; }
@@ -340,6 +366,7 @@ button:focus-visible, input:focus-visible {
 .spin { animation: spin 900ms linear infinite; }
 .page-enter { animation: page-enter 360ms cubic-bezier(.22, 1, .36, 1) both; }
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { to { opacity: .35; transform: scale(.8); } }
 @keyframes page-enter { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
 @keyframes particle-drift {
   from { transform: translate(-50%, -50%) rotate(var(--particle-rotation)) translate3d(-2px, -3px, 0); opacity: calc(var(--particle-opacity) * .72); }

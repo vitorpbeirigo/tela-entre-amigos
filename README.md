@@ -6,10 +6,11 @@ Aplicativo Windows e macOS de compartilhamento de tela P2P em alta qualidade par
 
 1. Instale e abra o Tela nos computadores do grupo.
 2. Quem vai transmitir clica em **Compartilhar minha tela**, escolhe a tela ou janela e copia o código da sala.
-3. Os amigos abrem o aplicativo, colam o código em **Entrar em uma sala** e clicam em **Assistir**.
-4. Quem assiste pode ajustar ou silenciar o volume da transmissão sem afetar os demais participantes.
+3. Os amigos informam o nome, colam o código em **Entrar em uma sala** e pedem para assistir.
+4. O anfitrião aprova cada pessoa antes que o vídeo seja enviado e pode removê-la a qualquer momento.
+5. Quem assiste pode ajustar ou silenciar o volume da transmissão sem afetar os demais participantes.
 
-O anfitrião escolhe entre 720p a 30 FPS, 1080p a 30 FPS, 1080p a 60 FPS e 1440p a 60 FPS. A qualidade real também depende do computador, da tela selecionada e da rota de internet entre os participantes.
+O anfitrião escolhe entre 720p a 30 FPS, 1080p a 30 FPS, 1080p a 60 FPS e 1440p a 60 FPS. A qualidade pode ser alterada durante a transmissão sem desconectar ninguém ou trocar o código da sala. A qualidade real também depende do computador, da tela selecionada e da rota de internet entre os participantes.
 
 Para transmitir enquanto joga, use o modo **Jogar**: 720p, 30 FPS e 4 Mbps. Ele prioriza os FPS do jogo, pausa a prévia local por padrão e permite reabri-la quando necessário. O Tela também impede instâncias duplicadas e encerra o capturador de áudio automaticamente se o processo principal fechar ou travar.
 
@@ -17,8 +18,8 @@ Para transmitir enquanto joga, use o modo **Jogar**: 720p, 30 FPS e 4 Mbps. Ele 
 
 ## Usar no macOS
 
-- `Tela-0.7.0-mac-arm64.dmg`: Macs com Apple Silicon (M1, M2, M3, M4 ou mais novo).
-- `Tela-0.7.0-mac-x64.dmg`: Macs Intel.
+- `Tela-0.8.0-mac-arm64.dmg`: Macs com Apple Silicon (M1, M2, M3, M4 ou mais novo).
+- `Tela-0.8.0-mac-x64.dmg`: Macs Intel.
 - Recomendado: macOS 13 ou mais recente para capturar também o áudio do sistema sem instalar um driver virtual.
 
 Na primeira transmissão, o macOS pedirá acesso à gravação de tela e ao áudio do sistema. Autorize o **Tela** em **Ajustes do Sistema > Privacidade e Segurança**, feche o aplicativo completamente e abra novamente. Se a permissão estiver bloqueada, o próprio Tela mostra um botão para abrir esses ajustes.
@@ -40,6 +41,7 @@ Esse comando remove a quarentena somente desse aplicativo. Depois, clique com o 
 - Trystero com relays públicos Nostr e MQTT em paralelo para descoberta redundante dos computadores.
 - Fallback TURN carregado por configuração remota quando a conexão direta é bloqueada.
 - Atualizações automáticas distribuídas por GitHub Releases.
+- Renderer isolado com sandbox do Chromium, CSP restritiva e IPC validado.
 - Sem banco de dados e sem armazenamento de mídia.
 
 ## Desenvolvimento
@@ -55,7 +57,7 @@ npm.cmd run dev
 npm.cmd run build
 ```
 
-No Windows, o instalador será gerado em `artifacts/Tela-Setup-0.7.0.exe`, junto de `latest.yml` e do arquivo `.blockmap` usados pelo atualizador.
+No Windows, o instalador será gerado em `artifacts/Tela-Setup-0.8.0.exe`, junto de `latest.yml` e do arquivo `.blockmap` usados pelo atualizador.
 
 Os pacotes macOS devem ser gerados num Mac ou pelo workflow do GitHub Actions:
 
@@ -72,8 +74,8 @@ O workflow incluído compila o instalador em uma máquina Windows do GitHub:
 ```powershell
 git remote add origin URL_DO_SEU_REPOSITORIO
 git push -u origin main
-git tag v0.7.0
-git push origin v0.7.0
+git tag v0.8.0
+git push origin v0.8.0
 ```
 
 Ao enviar uma tag `v*`, o GitHub Actions compila Windows, macOS Intel e macOS Apple Silicon e cria uma Release com todos os instaladores anexados. Também é possível executar **Build Tela installers** manualmente na aba Actions para baixar os arquivos como artefatos.
@@ -90,7 +92,7 @@ O arquivo `network.json` é consultado em cada sessão. Defina `turnCredentialsU
 - Relays públicos Nostr e MQTT são usados somente para os participantes se encontrarem e negociarem a conexão.
 - O aplicativo não grava nem armazena a transmissão.
 - A conexão direta continua sem custo. TURN só transporta mídia quando a rede direta falha e consome a franquia do provedor.
-- O código da sala funciona como senha: compartilhe apenas com quem deve entrar e crie uma nova sala a cada sessão.
+- O código da sala funciona como senha e o anfitrião ainda precisa aprovar cada entrada. Compartilhe o código apenas com quem deve entrar e crie uma nova sala a cada sessão.
 
 ## Limite conhecido do MVP
 

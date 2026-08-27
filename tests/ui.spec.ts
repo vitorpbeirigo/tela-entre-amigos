@@ -15,7 +15,7 @@ const mockDesktop = async (
 
     Object.defineProperty(window, "telaDesktop", {
       value: {
-        getVersion: async () => "0.7.0-test",
+        getVersion: async () => "0.8.0-test",
         getPlatform: async () => desktopPlatform,
         getCapturePermission: async () => permission,
         openCaptureSettings: async () => {
@@ -67,7 +67,14 @@ const mockDesktop = async (
         context.fillStyle = "#dff247";
         context.font = "64px sans-serif";
         context.fillText("Tela — teste P2P", 120, 180);
-        return canvas.captureStream(10);
+        const stream = canvas.captureStream(10);
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+          videoTrack.applyConstraints = async (constraints) => {
+            sessionStorage.setItem("live-quality-constraints", JSON.stringify(constraints));
+          };
+        }
+        return stream;
       },
     });
   }, { updateStatus: initialUpdateStatus, desktopPlatform: platform, permission: capturePermission });
@@ -117,6 +124,7 @@ test("valida o código de uma sala antes de conectar", async ({ page }) => {
   await mockDesktop(page);
   await page.goto("/");
   await page.getByRole("button", { name: /Entrar em uma sala/i }).click();
+  await page.getByLabel("Seu nome").fill("Greg");
   await page.getByLabel("Código da sala").fill("CURTO");
   await page.getByRole("button", { name: /Assistir agora/i }).click();
   await expect(page.getByText("Cole o código completo da sala.")).toBeVisible();
@@ -126,6 +134,7 @@ test("permite ao espectador controlar e silenciar o volume", async ({ page }) =>
   await mockDesktop(page);
   await page.goto("/");
   await page.getByRole("button", { name: /Entrar em uma sala/i }).click();
+  await page.getByLabel("Seu nome").fill("Greg");
   await page.getByLabel("Código da sala").fill("ABCDE-FGHJK-LMNPQ-RSTUV");
   await page.getByRole("button", { name: /Assistir agora/i }).click();
 
@@ -160,6 +169,24 @@ test("copia o código da sala usando a ponte nativa", async ({ page }) => {
   expect(await page.evaluate(() => sessionStorage.getItem("copied-room-code"))).toBe(code);
 });
 
+test("altera a qualidade durante a transmissão sem trocar o código", async ({ page }) => {
+  await mockDesktop(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: /Compartilhar minha tela/i }).click();
+  await expect(page.locator(".source-card").first()).toBeVisible();
+  await page.getByRole("button", { name: /Iniciar transmissão/i }).click();
+  const originalCode = (await page.locator(".room-code-copy span").textContent())!.trim();
+
+  await page.getByLabel("Qualidade ao vivo").selectOption("cinema");
+
+  await expect(page.getByText(/Cinema aplicada sem desconectar ninguém/i)).toBeVisible();
+  await expect(page.locator(".room-code-copy span")).toHaveText(originalCode);
+  const constraints = JSON.parse((await page.evaluate(() => sessionStorage.getItem("live-quality-constraints")))!);
+  expect(constraints.width.max).toBe(1920);
+  expect(constraints.height.max).toBe(1080);
+  expect(constraints.frameRate.max).toBe(30);
+});
+
 test("oferece reinício quando uma atualização automática termina", async ({ page }) => {
   await mockDesktop(page, { state: "downloaded", version: "0.2.1" });
   await page.goto("/");
@@ -183,11 +210,21 @@ test("dois clientes se encontram pela descoberta P2P pública", async ({ page, c
 
   await viewer.goto("/");
   await viewer.getByRole("button", { name: /Entrar em uma sala/i }).click();
+  await viewer.getByLabel("Seu nome").fill("Amigo de teste");
   await viewer.getByLabel("Código da sala").fill(code);
   await viewer.getByRole("button", { name: /Assistir agora/i }).click();
 
+  await expect(page.getByText("Amigo de teste", { exact: true })).toBeVisible({ timeout: 35_000 });
+  await expect(viewer.locator(".watch-room")).toContainText("Aguardando aprovação");
+  await expect.poll(async () =>
+    viewer.locator(".viewer-stage video").evaluate((video: HTMLVideoElement) => Boolean(video.srcObject)),
+  ).toBe(false);
+  await page.getByRole("button", { name: "Permitir Amigo de teste" }).click();
   await expect(viewer.locator(".watch-room")).toContainText("Conectado", { timeout: 35_000 });
   await expect.poll(async () =>
     viewer.locator(".viewer-stage video").evaluate((video: HTMLVideoElement) => Boolean(video.srcObject)),
   ).toBe(true);
+
+  await page.getByRole("button", { name: "Remover Amigo de teste" }).click();
+  await expect(viewer.locator(".watch-room")).toContainText("Você foi removido");
 });

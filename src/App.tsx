@@ -18,6 +18,9 @@ import {
   ScreenShareOff,
   ShieldCheck,
   Sparkles,
+  UserCheck,
+  UserMinus,
+  UserX,
   Users,
   Volume2,
   VolumeX,
@@ -54,6 +57,26 @@ interface ConnectionStats {
   resolution: string;
   fps: string;
   latency: string;
+}
+
+type ViewerAdmissionStatus = "pending" | "approved";
+
+interface ViewerParticipant {
+  peerId: string;
+  name: string;
+  status: ViewerAdmissionStatus;
+  strategy: string;
+}
+
+interface ViewerRoute {
+  room: Room;
+  strategy: string;
+  sendAdmission: (data: unknown, options: { target: string }) => Promise<unknown>;
+}
+
+interface ViewerConnection extends ViewerParticipant {
+  routes: ViewerRoute[];
+  activeRoom?: Room;
 }
 
 const QUALITY_PRESETS: QualityPreset[] = [
@@ -99,55 +122,6 @@ const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const TRYSTERO_APP_ID = "com.gregpreto.tela.p2p.v1";
 const CONNECTION_TIMEOUT_MS = 20_000;
 const PARTICLE_COLORS = ["#8052ff", "#ffb829", "#15846e", "#b96cff", "#5d8dff", "#ff5caa"];
-const FILTERED_AUDIO_WORKLET = `
-class TelaPcmQueueProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super();
-    this.queue = [];
-    this.offset = 0;
-    this.queuedSamples = 0;
-    this.port.onmessage = ({ data }) => {
-      if (!(data instanceof Float32Array) || data.length === 0) return;
-      if (this.queuedSamples > 384000) {
-        this.queue = [];
-        this.offset = 0;
-        this.queuedSamples = 0;
-      }
-      this.queue.push(data);
-      this.queuedSamples += data.length;
-    };
-  }
-
-  process(_inputs, outputs) {
-    const output = outputs[0];
-    if (!output || output.length < 2) return true;
-    const left = output[0];
-    const right = output[1];
-    let outputFrame = 0;
-
-    while (outputFrame < left.length && this.queue.length > 0) {
-      const samples = this.queue[0];
-      const availableFrames = Math.floor((samples.length - this.offset) / 2);
-      const framesToCopy = Math.min(left.length - outputFrame, availableFrames);
-      for (let frame = 0; frame < framesToCopy; frame += 1) {
-        const sampleIndex = this.offset + frame * 2;
-        left[outputFrame + frame] = samples[sampleIndex];
-        right[outputFrame + frame] = samples[sampleIndex + 1];
-      }
-      outputFrame += framesToCopy;
-      this.offset += framesToCopy * 2;
-      this.queuedSamples -= framesToCopy * 2;
-      if (this.offset >= samples.length) {
-        this.queue.shift();
-        this.offset = 0;
-      }
-    }
-    return true;
-  }
-}
-registerProcessor("tela-pcm-queue", TelaPcmQueueProcessor);
-`;
-
 function seededValue(index: number, salt: number) {
   const value = Math.sin(index * 12.9898 + salt * 78.233) * 43758.5453;
   return value - Math.floor(value);
@@ -194,6 +168,10 @@ function normalizeRoomCode(value: string) {
   return raw.match(/.{1,5}/g)?.join("-") ?? raw;
 }
 
+function normalizeDisplayName(value: string) {
+  return value.replace(/\s+/g, " ").replace(/[^\p{L}\p{N} ._'-]/gu, "").slice(0, 32);
+}
+
 function formatBitrate(bitsPerSecond: number) {
   if (!Number.isFinite(bitsPerSecond) || bitsPerSecond <= 0) return "—";
   return `${(bitsPerSecond / 1_000_000).toFixed(1)} Mbps`;
@@ -205,15 +183,19 @@ function App() {
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [selectedSourceId, setSelectedSourceId] = useState<string>("");
   const [qualityKey, setQualityKey] = useState<QualityKey>("performance");
+  const [qualityChanging, setQualityChanging] = useState(false);
+  const [qualityNotice, setQualityNotice] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [joinCode, setJoinCode] = useState("");
+  const [viewerName, setViewerName] = useState(() => localStorage.getItem("tela-viewer-name") ?? "");
+  const [viewerParticipants, setViewerParticipants] = useState<ViewerParticipant[]>([]);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [viewerCount, setViewerCount] = useState(0);
   const [connectionState, setConnectionState] = useState("Preparando");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [version, setVersion] = useState("0.7.0");
+  const [version, setVersion] = useState("0.8.0");
   const [platform, setPlatform] = useState<NodeJS.Platform | "">("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [viewerVolume, setViewerVolume] = useState(1);
@@ -233,7 +215,10 @@ function App() {
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const viewerRoomsRef = useRef(new Map<string, Room>());
+  const viewerConnectionsRef = useRef(new Map<string, ViewerConnection>());
+  const deniedViewerIdsRef = useRef(new Set<string>());
   const hostSessionRef = useRef<{ peerId: string; room: Room } | null>(null);
+  const viewerAdmissionStateRef = useRef<"pending" | "approved" | "denied" | "kicked">("pending");
   const connectionErrorsRef = useRef(new Set<string>());
   const connectionTimeoutRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -303,12 +288,8 @@ function App() {
 
     const context = new AudioContext({ sampleRate: 48_000, latencyHint: "interactive" });
     audioContextRef.current = context;
-    const moduleUrl = URL.createObjectURL(new Blob([FILTERED_AUDIO_WORKLET], { type: "text/javascript" }));
-    try {
-      await context.audioWorklet.addModule(moduleUrl);
-    } finally {
-      URL.revokeObjectURL(moduleUrl);
-    }
+    const moduleUrl = new URL("tela-pcm-worklet.js", window.location.href).toString();
+    await context.audioWorklet.addModule(moduleUrl);
 
     const worklet = new AudioWorkletNode(context, "tela-pcm-queue", {
       numberOfInputs: 0,
@@ -361,24 +342,49 @@ function App() {
     return track;
   }, [platform, stopFilteredAudio]);
 
-  const configureVideoSender = useCallback(async (pc: RTCPeerConnection) => {
+  const configureVideoSender = useCallback(async (pc: RTCPeerConnection, preset: QualityPreset) => {
     const sender = pc.getSenders().find((item) => item.track?.kind === "video");
     if (!sender) return;
 
     const parameters = sender.getParameters();
-    parameters.degradationPreference = quality.key === "performance" ? "maintain-framerate" : "balanced";
+    parameters.degradationPreference = preset.key === "performance" ? "maintain-framerate" : "balanced";
     parameters.encodings = parameters.encodings?.length ? parameters.encodings : [{}];
-    parameters.encodings[0].maxBitrate = quality.maxBitrate;
-    parameters.encodings[0].maxFramerate = quality.frameRate;
+    parameters.encodings[0].maxBitrate = preset.maxBitrate;
+    parameters.encodings[0].maxFramerate = preset.frameRate;
+
+    const settings = sender.track?.getSettings();
+    const scale = Math.max(
+      (settings?.width ?? preset.width) / preset.width,
+      (settings?.height ?? preset.height) / preset.height,
+      1,
+    );
+    parameters.encodings[0].scaleResolutionDownBy = scale > 1.05 ? scale : 1;
 
     try {
       await sender.setParameters(parameters);
     } catch (senderError) {
       console.warn("O navegador ajustará automaticamente o bitrate", senderError);
     }
-  }, [quality]);
+  }, []);
 
-  const joinP2PRoom = useCallback((role: Role, code: string, turnConfig: TurnServerConfig[], stream?: MediaStream) => {
+  const syncViewerParticipants = useCallback(() => {
+    const participants = [...viewerConnectionsRef.current.values()].map(({ peerId, name, status, strategy }) => ({
+      peerId,
+      name,
+      status,
+      strategy,
+    }));
+    setViewerParticipants(participants);
+    setViewerCount(participants.filter((participant) => participant.status === "approved").length);
+  }, []);
+
+  const joinP2PRoom = useCallback((
+    role: Role,
+    code: string,
+    turnConfig: TurnServerConfig[],
+    stream?: MediaStream,
+    initialQuality: QualityPreset = QUALITY_PRESETS[0],
+  ) => {
     const roomId = code.replaceAll("-", "");
     const roomConfig = {
       appId: TRYSTERO_APP_ID,
@@ -408,17 +414,55 @@ function App() {
     ];
     roomRefs.current = strategyRooms.map(({ room }) => room);
 
+    const startViewerStream = async (connection: ViewerConnection, preferredRoute?: ViewerRoute) => {
+      if (!stream || connection.status !== "approved") return;
+      const route = preferredRoute ?? connection.routes[0];
+      if (!route) return;
+
+      connection.activeRoom = route.room;
+      viewerRoomsRef.current.set(connection.peerId, route.room);
+      syncViewerParticipants();
+      setConnectionState(`Transmitindo · ${route.strategy}`);
+      await Promise.allSettled(connection.routes.map((candidate) =>
+        candidate.sendAdmission({ status: "approved" }, { target: connection.peerId }),
+      ));
+      route.room.addStream(stream, {
+        target: connection.peerId,
+        metadata: { kind: "screen", strategy: route.strategy },
+      });
+      window.setTimeout(() => {
+        const pc = route.room.getPeers()[connection.peerId];
+        if (pc) void configureVideoSender(pc, initialQuality);
+      }, 500);
+    };
+
     for (const { room, strategy } of strategyRooms) {
       const presence = room.makeAction("presence");
+      const admission = room.makeAction("admission");
       const announceRole = (target: string) => {
-        void presence.send({ role }, { target });
+        void presence.send(
+          role === "viewer" ? { role, name: normalizeDisplayName(viewerName).trim() } : { role },
+          { target },
+        );
       };
 
       room.onPeerJoin = (peerId) => announceRole(peerId);
       room.onPeerLeave = (peerId) => {
-        if (role === "host" && viewerRoomsRef.current.get(peerId) === room) {
-          viewerRoomsRef.current.delete(peerId);
-          setViewerCount(viewerRoomsRef.current.size);
+        if (role === "host") {
+          const connection = viewerConnectionsRef.current.get(peerId);
+          if (!connection) return;
+          connection.routes = connection.routes.filter((route) => route.room !== room);
+          if (connection.activeRoom === room) {
+            viewerRoomsRef.current.delete(peerId);
+            connection.activeRoom = undefined;
+            const fallbackRoute = connection.routes[0];
+            if (connection.status === "approved" && fallbackRoute) {
+              void startViewerStream(connection, fallbackRoute);
+              return;
+            }
+          }
+          if (connection.routes.length === 0) viewerConnectionsRef.current.delete(peerId);
+          syncViewerParticipants();
         } else if (
           role === "viewer" &&
           hostSessionRef.current?.peerId === peerId &&
@@ -427,32 +471,80 @@ function App() {
           hostSessionRef.current = null;
           remoteStreamRef.current = null;
           setRemoteStream(null);
-          setConnectionState("A transmissão terminou");
+          if (viewerAdmissionStateRef.current !== "denied" && viewerAdmissionStateRef.current !== "kicked") {
+            setConnectionState("A transmissão terminou");
+          }
         }
       };
 
       presence.onMessage = (data, { peerId }) => {
-        const remoteRole = (data as { role?: Role })?.role;
-        if (role === "host" && remoteRole === "viewer" && stream && !viewerRoomsRef.current.has(peerId)) {
-          viewerRoomsRef.current.set(peerId, room);
-          setViewerCount(viewerRoomsRef.current.size);
-          setConnectionState(`Transmitindo · ${strategy}`);
-          room.addStream(stream, { target: peerId, metadata: { kind: "screen", strategy } });
-          window.setTimeout(() => {
-            const pc = room.getPeers()[peerId];
-            if (pc) void configureVideoSender(pc);
-          }, 500);
+        const presenceData = data as { role?: Role; name?: string };
+        const remoteRole = presenceData?.role;
+        if (role === "host" && remoteRole === "viewer" && stream) {
+          const route: ViewerRoute = {
+            room,
+            strategy,
+            sendAdmission: admission.send as ViewerRoute["sendAdmission"],
+          };
+          if (deniedViewerIdsRef.current.has(peerId)) {
+            void route.sendAdmission({ status: "denied" }, { target: peerId });
+            return;
+          }
+
+          const current = viewerConnectionsRef.current.get(peerId);
+          if (current) {
+            if (!current.routes.some((candidate) => candidate.room === room)) current.routes.push(route);
+            if (presenceData.name) current.name = normalizeDisplayName(presenceData.name).trim() || current.name;
+            syncViewerParticipants();
+          } else {
+            viewerConnectionsRef.current.set(peerId, {
+              peerId,
+              name: normalizeDisplayName(presenceData.name ?? "").trim() || `Amigo ${peerId.slice(0, 4).toUpperCase()}`,
+              status: "pending",
+              strategy,
+              routes: [route],
+            });
+            setConnectionState("Aguardando sua aprovação");
+            syncViewerParticipants();
+          }
         }
 
         if (role === "viewer" && remoteRole === "host" && !hostSessionRef.current) {
           hostSessionRef.current = { peerId, room };
-          setConnectionState(`Aguardando vídeo · ${strategy}`);
+          setConnectionState(`Aguardando aprovação · ${strategy}`);
         }
       };
 
       if (role === "viewer") {
+        admission.onMessage = (data, { peerId }) => {
+          if (hostSessionRef.current?.peerId !== peerId) return;
+          const status = (data as { status?: string })?.status;
+          if (status === "approved") {
+            viewerAdmissionStateRef.current = "approved";
+            hostSessionRef.current = { peerId, room };
+            setConnectionState(`Aguardando vídeo · ${strategy}`);
+            setError("");
+          } else if (status === "denied" || status === "kicked") {
+            viewerAdmissionStateRef.current = status;
+            remoteStreamRef.current?.getTracks().forEach((track) => track.stop());
+            remoteStreamRef.current = null;
+            setRemoteStream(null);
+            setConnectionState(status === "kicked" ? "Você foi removido" : "Entrada não autorizada");
+            setError(status === "kicked"
+              ? "O anfitrião encerrou seu acesso a esta transmissão."
+              : "O anfitrião não autorizou sua entrada nesta transmissão.");
+          }
+        };
+      }
+
+      if (role === "viewer") {
         room.onPeerStream = (incomingStream, peerId, metadata) => {
-          if ((metadata as { kind?: string } | undefined)?.kind !== "screen" || remoteStreamRef.current) return;
+          if (
+            (metadata as { kind?: string } | undefined)?.kind !== "screen" ||
+            remoteStreamRef.current ||
+            hostSessionRef.current?.peerId !== peerId ||
+            viewerAdmissionStateRef.current !== "approved"
+          ) return;
           hostSessionRef.current = { peerId, room };
           remoteStreamRef.current = incomingStream;
           setRemoteStream(incomingStream);
@@ -479,7 +571,92 @@ function App() {
           : "Não foi possível acessar os serviços de sala. Verifique a internet ou o Firewall do Windows e tente novamente.");
       }, CONNECTION_TIMEOUT_MS);
     }
-  }, [configureVideoSender]);
+  }, [configureVideoSender, syncViewerParticipants, viewerName]);
+
+  const approveViewer = useCallback(async (peerId: string) => {
+    const connection = viewerConnectionsRef.current.get(peerId);
+    const stream = localStreamRef.current;
+    if (!connection || !stream || connection.status === "approved") return;
+    const route = connection.routes[0];
+    if (!route) return;
+
+    connection.status = "approved";
+    connection.activeRoom = route.room;
+    viewerRoomsRef.current.set(peerId, route.room);
+    syncViewerParticipants();
+    setConnectionState(`Transmitindo · ${route.strategy}`);
+    await Promise.allSettled(connection.routes.map((candidate) =>
+      candidate.sendAdmission({ status: "approved" }, { target: peerId }),
+    ));
+    route.room.addStream(stream, { target: peerId, metadata: { kind: "screen", strategy: route.strategy } });
+    window.setTimeout(() => {
+      const pc = route.room.getPeers()[peerId];
+      if (pc) void configureVideoSender(pc, quality);
+    }, 500);
+    window.telaDesktop.logEvent("viewer-approved", { peer: peerId.slice(0, 8) });
+  }, [configureVideoSender, quality, syncViewerParticipants]);
+
+  const removeViewer = useCallback(async (peerId: string, status: "denied" | "kicked") => {
+    const connection = viewerConnectionsRef.current.get(peerId);
+    if (!connection) return;
+
+    deniedViewerIdsRef.current.add(peerId);
+    await Promise.allSettled(connection.routes.map((route) =>
+      route.sendAdmission({ status }, { target: peerId }),
+    ));
+    for (const route of connection.routes) {
+      const pc = route.room.getPeers()[peerId];
+      if (pc) {
+        for (const sender of pc.getSenders()) {
+          if (sender.track) await sender.replaceTrack(null).catch(() => undefined);
+        }
+        window.setTimeout(() => pc.close(), 250);
+      }
+    }
+    viewerRoomsRef.current.delete(peerId);
+    viewerConnectionsRef.current.delete(peerId);
+    syncViewerParticipants();
+    setConnectionState(viewerRoomsRef.current.size ? "Transmitindo" : "Sala aberta");
+    window.telaDesktop.logEvent(status === "kicked" ? "viewer-kicked" : "viewer-denied", { peer: peerId.slice(0, 8) });
+  }, [syncViewerParticipants]);
+
+  const changeLiveQuality = useCallback(async (nextKey: QualityKey) => {
+    const preset = QUALITY_PRESETS.find((candidate) => candidate.key === nextKey);
+    const track = localStreamRef.current?.getVideoTracks()[0];
+    if (!preset || !track || nextKey === qualityKey || qualityChanging) return;
+
+    setQualityChanging(true);
+    setQualityNotice("Ajustando para todos…");
+    setError("");
+    try {
+      await track.applyConstraints({
+        width: { ideal: preset.width, max: preset.width },
+        height: { ideal: preset.height, max: preset.height },
+        frameRate: { ideal: preset.frameRate, max: preset.frameRate },
+      });
+      const peerConnections = [...viewerRoomsRef.current.entries()].flatMap(([peerId, room]) => {
+        const pc = room.getPeers()[peerId];
+        return pc ? [pc] : [];
+      });
+      await Promise.all(peerConnections.map((pc) => configureVideoSender(pc, preset)));
+      setQualityKey(nextKey);
+      setQualityNotice(`${preset.label} aplicada sem desconectar ninguém.`);
+      window.telaDesktop.logEvent("quality-change", {
+        quality: preset.key,
+        width: preset.width,
+        height: preset.height,
+        fps: preset.frameRate,
+        bitrate: preset.maxBitrate,
+      });
+      window.setTimeout(() => setQualityNotice(""), 3_000);
+    } catch (qualityError) {
+      console.warn("Não foi possível alterar a qualidade ao vivo", qualityError);
+      setQualityNotice("");
+      setError("Este monitor não aceitou a nova qualidade. A transmissão continuou na configuração anterior.");
+    } finally {
+      setQualityChanging(false);
+    }
+  }, [configureVideoSender, qualityChanging, qualityKey]);
 
   const cleanup = useCallback(() => {
     const hadActiveSession = Boolean(localStreamRef.current || remoteStreamRef.current || roomRefs.current.length);
@@ -490,7 +667,10 @@ function App() {
     });
     roomRefs.current = [];
     viewerRoomsRef.current.clear();
+    viewerConnectionsRef.current.clear();
+    deniedViewerIdsRef.current.clear();
     hostSessionRef.current = null;
+    viewerAdmissionStateRef.current = "pending";
     connectionErrorsRef.current.clear();
     if (connectionTimeoutRef.current !== null) window.clearTimeout(connectionTimeoutRef.current);
     connectionTimeoutRef.current = null;
@@ -511,6 +691,9 @@ function App() {
     setRemoteStream(null);
     setShowLocalPreview(false);
     setViewerCount(0);
+    setViewerParticipants([]);
+    setQualityChanging(false);
+    setQualityNotice("");
     setStats({ bitrate: "—", resolution: "—", fps: "—", latency: "—" });
     if (hadActiveSession) window.telaDesktop.logEvent("capture-stop");
   }, [stopFilteredAudio]);
@@ -594,7 +777,7 @@ function App() {
         fps: quality.frameRate,
         bitrate: quality.maxBitrate,
       });
-      joinP2PRoom("host", code, turnServers, stream);
+      joinP2PRoom("host", code, turnServers, stream, quality);
     } catch (startError) {
       stream?.getTracks().forEach((track) => track.stop());
       cleanup();
@@ -608,11 +791,19 @@ function App() {
 
   const joinRoom = useCallback(async () => {
     const code = normalizeRoomCode(joinCode);
+    const name = normalizeDisplayName(viewerName).trim();
+    if (name.length < 2) {
+      setError("Digite seu nome para o anfitrião reconhecer você.");
+      return;
+    }
     if (code.replaceAll("-", "").length !== 20) {
       setError("Cole o código completo da sala.");
       return;
     }
 
+    localStorage.setItem("tela-viewer-name", name);
+    setViewerName(name);
+    viewerAdmissionStateRef.current = "pending";
     setError("");
     setRoomCode(code);
     setConnectionState("Preparando as rotas");
@@ -626,7 +817,7 @@ function App() {
       setView("viewer-join");
       setError(joinError instanceof Error ? joinError.message : "Não foi possível entrar na sala.");
     }
-  }, [cleanup, joinCode, joinP2PRoom]);
+  }, [cleanup, joinCode, joinP2PRoom, viewerName]);
 
   const leaveSession = useCallback(() => {
     cleanup();
@@ -845,6 +1036,17 @@ function App() {
           <PageHeading kicker="Convite privado" title="Entrar em uma sala" subtitle="Cole o código que seu amigo enviou para você." onBack={leaveSession} />
           <div className="join-card panel">
             <div className="join-icon"><Link2 size={28} /></div>
+            <label htmlFor="viewer-name">Seu nome</label>
+            <input
+              id="viewer-name"
+              className="room-input name-input"
+              value={viewerName}
+              onChange={(event) => setViewerName(normalizeDisplayName(event.target.value))}
+              placeholder="Como seus amigos te chamam"
+              maxLength={32}
+              autoComplete="nickname"
+              autoFocus
+            />
             <label htmlFor="room-code">Código da sala</label>
             <input
               id="room-code"
@@ -853,7 +1055,6 @@ function App() {
               onChange={(event) => setJoinCode(normalizeRoomCode(event.target.value))}
               onKeyDown={(event) => { if (event.key === "Enter") void joinRoom(); }}
               placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
-              autoFocus
               spellCheck={false}
             />
             {error && <ErrorBanner message={error} compact />}
@@ -897,13 +1098,80 @@ function App() {
               <div className="invite-card panel">
                 <span className="card-kicker">CONVITE</span>
                 <h2>Chame seus amigos</h2>
-                <p>Envie este código. Só entra quem tiver acesso a ele.</p>
+                <p>Envie este código. Você ainda aprova cada pessoa antes de liberar o vídeo.</p>
                 <button className="room-code-copy" onClick={() => void copyInvite()}>
                   <span>{roomCode}</span>{copied ? <Check size={18} /> : <Copy size={18} />}
                 </button>
                 <button className="button button-primary copy-button" onClick={() => void copyInvite()}>
                   {copied ? <><Check size={16} /> Copiado</> : <><Clipboard size={16} /> Copiar código</>}
                 </button>
+              </div>
+
+              <div className="panel live-quality-card">
+                <div className="sidebar-heading">
+                  <span className="card-kicker">QUALIDADE AO VIVO</span>
+                  <span className={qualityChanging ? "quality-pulse active" : "quality-pulse"} />
+                </div>
+                <label htmlFor="live-quality">Qualidade ao vivo</label>
+                <select
+                  id="live-quality"
+                  value={qualityKey}
+                  disabled={qualityChanging}
+                  onChange={(event) => void changeLiveQuality(event.target.value as QualityKey)}
+                >
+                  {QUALITY_PRESETS.map((preset) => (
+                    <option key={preset.key} value={preset.key}>{preset.label} — {preset.detail}</option>
+                  ))}
+                </select>
+                <p>{qualityNotice || "Troque sem encerrar a tela, desconectar amigos ou mudar o código."}</p>
+              </div>
+
+              <div className="panel participants-card">
+                <div className="sidebar-heading">
+                  <span className="card-kicker">PESSOAS</span>
+                  <span className="participant-total">{viewerParticipants.length}</span>
+                </div>
+                {viewerParticipants.length === 0 ? (
+                  <div className="participants-empty"><Users size={17} /> Ninguém pediu para entrar.</div>
+                ) : (
+                  <div className="participant-list">
+                    {viewerParticipants.map((participant) => (
+                      <div className={`participant-row ${participant.status}`} key={participant.peerId}>
+                        <span className="participant-avatar">{participant.name.slice(0, 1).toUpperCase()}</span>
+                        <span className="participant-name">
+                          <strong>{participant.name}</strong>
+                          <small>{participant.status === "pending" ? "Quer assistir" : `Assistindo · ${participant.strategy}`}</small>
+                        </span>
+                        {participant.status === "pending" ? (
+                          <span className="participant-actions">
+                            <button
+                              type="button"
+                              className="participant-allow"
+                              onClick={() => void approveViewer(participant.peerId)}
+                              aria-label={`Permitir ${participant.name}`}
+                              title="Permitir"
+                            ><UserCheck size={16} /></button>
+                            <button
+                              type="button"
+                              className="participant-deny"
+                              onClick={() => void removeViewer(participant.peerId, "denied")}
+                              aria-label={`Recusar ${participant.name}`}
+                              title="Recusar"
+                            ><UserX size={16} /></button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="participant-deny"
+                            onClick={() => void removeViewer(participant.peerId, "kicked")}
+                            aria-label={`Remover ${participant.name}`}
+                            title="Remover"
+                          ><UserMinus size={16} /></button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="panel session-card">
