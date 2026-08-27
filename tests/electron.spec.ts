@@ -32,6 +32,11 @@ test("o aplicativo Electron lista fontes reais e inicia a captura", async () => 
     window.on("pageerror", (error) => errors.push(error.message));
 
     await expect(window.getByRole("heading", { name: /Sua tela/i })).toBeVisible();
+    const brandImages = window.locator(".brand-logo, .hero-device-card img");
+    await expect(brandImages).toHaveCount(2);
+    for (const image of await brandImages.all()) {
+      await expect.poll(async () => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true);
+    }
     expect(await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0]?.webContents.getLastWebPreferences().sandbox,
     )).toBe(true);
@@ -56,6 +61,8 @@ test("o aplicativo Electron lista fontes reais e inicia a captura", async () => 
     await window.getByRole("button", { name: /Copiar código/i }).click();
     await expect(window.getByRole("button", { name: /Copiado/i })).toBeVisible();
     expect(await app.evaluate(async ({ clipboard }) => await clipboard.readText())).toBe(code);
+    await expect(window.getByRole("button", { name: /Copiar código/i })).toBeVisible({ timeout: 3_000 });
+    await expect(window.locator(".room-code-copy span")).toHaveText(code);
     expect(errors).toEqual([]);
   } finally {
     await app.close();

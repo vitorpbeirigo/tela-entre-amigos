@@ -1,6 +1,6 @@
 {
   "name": "infinity-entre-amigos",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "description": "Infinity: compartilhamento de tela P2P em alta qualidade para amigos.",
   "main": "electron/main.cjs",

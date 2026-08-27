@@ -187,6 +187,7 @@ function App() {
   const [qualityKey, setQualityKey] = useState<QualityKey>("performance");
   const [qualityChanging, setQualityChanging] = useState(false);
   const [qualityNotice, setQualityNotice] = useState("");
+  const [hostStarting, setHostStarting] = useState(false);
   const [roomCode, setRoomCode] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [viewerName, setViewerName] = useState(() => localStorage.getItem("tela-viewer-name") ?? "");
@@ -197,7 +198,7 @@ function App() {
   const [connectionState, setConnectionState] = useState("Preparando");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [version, setVersion] = useState("0.9.0");
+  const [version, setVersion] = useState("0.9.1");
   const [platform, setPlatform] = useState<NodeJS.Platform | "">("");
   const [showMacGuide, setShowMacGuide] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
@@ -224,6 +225,8 @@ function App() {
   const viewerAdmissionStateRef = useRef<"pending" | "approved" | "denied" | "kicked">("pending");
   const connectionErrorsRef = useRef(new Set<string>());
   const connectionTimeoutRef = useRef<number | null>(null);
+  const hostStartingRef = useRef(false);
+  const hostRoomCodeRef = useRef("");
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioWorkletRef = useRef<AudioWorkletNode | null>(null);
   const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
@@ -739,16 +742,24 @@ function App() {
   }, [platform]);
 
   const openHostSetup = useCallback(() => {
+    const code = generateRoomCode();
+    hostRoomCodeRef.current = code;
+    setRoomCode(code);
     setView("host-setup");
     void loadSources();
   }, [loadSources]);
 
   const startHosting = useCallback(async () => {
-    if (!selectedSourceId) return;
+    if (!selectedSourceId || hostStartingRef.current || localStreamRef.current) return;
+    hostStartingRef.current = true;
+    setHostStarting(true);
     setError("");
     setConnectionState("Abrindo a tela");
 
     let stream: MediaStream | null = null;
+    const code = hostRoomCodeRef.current || generateRoomCode();
+    hostRoomCodeRef.current = code;
+    setRoomCode(code);
     try {
       const turnServersPromise = window.telaDesktop.getTurnServers().catch(() => []);
       await window.telaDesktop.selectSource(selectedSourceId);
@@ -771,7 +782,6 @@ function App() {
         videoTrack.addEventListener("ended", () => cleanup(), { once: true });
       }
 
-      const code = generateRoomCode();
       const turnServers = await turnServersPromise;
       localStreamRef.current = stream;
       setLocalStream(stream);
@@ -794,6 +804,9 @@ function App() {
       setError(permissionDenied && platform === "darwin"
         ? "O macOS não liberou a captura. Permita o Infinity em Privacidade e Segurança > Gravação de Tela e Áudio do Sistema e abra o app novamente."
         : startError instanceof Error ? startError.message : "Não foi possível iniciar a transmissão.");
+    } finally {
+      hostStartingRef.current = false;
+      setHostStarting(false);
     }
   }, [cleanup, createFilteredAudioTrack, joinP2PRoom, platform, quality, selectedSourceId]);
 
@@ -829,6 +842,10 @@ function App() {
 
   const leaveSession = useCallback(() => {
     cleanup();
+    hostStartingRef.current = false;
+    hostRoomCodeRef.current = "";
+    setHostStarting(false);
+    setRoomCode("");
     setConnectionState("Preparando");
     setError("");
     setView("home");
@@ -890,7 +907,7 @@ function App() {
       <ParticleField particles={AMBIENT_PARTICLES} className="ambient-particles" />
       <header className="topbar">
         <button className="brand" onClick={leaveSession} aria-label="Voltar ao início">
-          <img className="brand-logo" src="/brand/infinity-app-icon.png" alt="" />
+          <img className="brand-logo" src="./brand/infinity-app-icon.png" alt="" />
           <span>Infinity</span>
         </button>
         <div className="topbar-actions">
@@ -978,7 +995,7 @@ function App() {
           <div className="hero-visual" aria-hidden="true">
             <div className="hero-device-card">
               <span className="device-label">PRIVATE DISPLAY LINK</span>
-              <img src="/brand/infinity-app-icon.png" alt="" />
+              <img src="./brand/infinity-app-icon.png" alt="" />
               <div className="device-readout">
                 <span><i className="status-dot" /> conectado</span>
                 <strong>1440P · 60 FPS</strong>
@@ -1069,8 +1086,8 @@ function App() {
                 </div>
               </div>
 
-              <button className="button button-primary start-button" disabled={!selectedSourceId || sourcesLoading} onClick={() => void startHosting()}>
-                Iniciar transmissão <ChevronRight size={18} />
+              <button className="button button-primary start-button" disabled={!selectedSourceId || sourcesLoading || hostStarting} onClick={() => void startHosting()}>
+                {hostStarting ? <><LoaderCircle className="spin" size={18} /> Iniciando…</> : <>Iniciar transmissão <ChevronRight size={18} /></>}
               </button>
               <p className="setup-note"><ShieldCheck size={14} /> Nada é gravado ou armazenado.</p>
             </aside>
