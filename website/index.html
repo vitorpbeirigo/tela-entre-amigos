@@ -13,6 +13,17 @@
     <title>Infinity — sua tela, sem distância</title>
   </head>
   <body>
+    <div class="ambient-background" aria-hidden="true">
+      <div class="ambient-mesh"></div>
+      <div class="aurora aurora-one"></div>
+      <div class="aurora aurora-two"></div>
+      <span class="spark spark-one"></span>
+      <span class="spark spark-two"></span>
+      <span class="spark spark-three"></span>
+      <span class="spark spark-four"></span>
+      <span class="spark spark-five"></span>
+      <span class="spark spark-six"></span>
+    </div>
     <header class="site-header">
       <a class="brand" href="#top" aria-label="Infinity, voltar ao início">
         <img src="assets/brand/infinity-app-icon.png" alt="" />
@@ -82,6 +93,38 @@
           <h3>Não tem cadastro</h3>
           <p>Abra, compartilhe o código privado e aprove quem deve assistir. Só isso.</p>
         </article>
+      </section>
+
+      <section class="network-section section-shell" id="rede">
+        <div class="network-visual">
+          <canvas id="friend-network" role="img" aria-label="Representação de uma sala Infinity com seis amigos conectados">
+            Seis amigos conectados em uma sala privada do Infinity.
+          </canvas>
+          <div class="network-live"><span><i></i> 6 amigos na sala</span><strong>P2P privado</strong></div>
+        </div>
+
+        <div class="network-content">
+          <span class="kicker">Sua turma, conectada</span>
+          <h2>Uma sala.<br /><em>Todos por perto.</em></h2>
+          <div class="network-list">
+            <details class="network-item" open>
+              <summary><span><i>01</i> Vídeo direto entre amigos</span><b aria-hidden="true"></b></summary>
+              <p>A imagem e o áudio viajam pelo WebRTC entre os participantes da sala, sem ficar gravados pelo Infinity.</p>
+            </details>
+            <details class="network-item">
+              <summary><span><i>02</i> Qualidade que acompanha a conexão</span><b aria-hidden="true"></b></summary>
+              <p>O anfitrião muda o perfil durante a transmissão e todos continuam na mesma sala, com o mesmo código.</p>
+            </details>
+            <details class="network-item">
+              <summary><span><i>03</i> Entrada aprovada pelo anfitrião</span><b aria-hidden="true"></b></summary>
+              <p>O convite encontra a sala, mas a transmissão só começa depois que quem está compartilhando aprovar.</p>
+            </details>
+            <details class="network-item">
+              <summary><span><i>04</i> Windows e Mac juntos</span><b aria-hidden="true"></b></summary>
+              <p>Os dois sistemas entram na mesma transmissão e recebem o vídeo pelo aplicativo instalado no computador.</p>
+            </details>
+          </div>
+        </div>
       </section>
 
       <section class="mac-guide section-shell" id="mac">
