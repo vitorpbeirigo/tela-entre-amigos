@@ -26,6 +26,15 @@ interface FilteredAudioStatus {
   discordExcluded?: boolean;
 }
 
+type ConnectionPermissionState = "allowed" | "blocked" | "missing" | "unavailable" | "cancelled" | "failed" | "requested" | "system-managed";
+
+interface ConnectionPermissionStatus {
+  state: ConnectionPermissionState;
+  blockedRules?: number;
+  allowedRules?: number;
+  matchingAllowedRules?: number;
+}
+
 interface Window {
   telaDesktop: {
     getSources(): Promise<CaptureSource[]>;
@@ -37,7 +46,11 @@ interface Window {
     getVersion(): Promise<string>;
     getPlatform(): Promise<NodeJS.Platform>;
     getCapturePermission(): Promise<"not-determined" | "granted" | "denied" | "restricted" | "unknown">;
+    requestCapturePermission(): Promise<"not-determined" | "granted" | "denied" | "restricted" | "unknown">;
     openCaptureSettings(): Promise<boolean>;
+    getConnectionPermission(): Promise<ConnectionPermissionStatus>;
+    requestConnectionPermission(): Promise<ConnectionPermissionStatus>;
+    openConnectionSettings(): Promise<boolean>;
     copyText(value: string): Promise<boolean>;
     getTurnServers(): Promise<TurnServerConfig[]>;
     logEvent(name: string, details?: Record<string, string | number | boolean>): void;

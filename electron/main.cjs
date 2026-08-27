@@ -1,5 +1,6 @@
 const { app, BrowserWindow, clipboard, desktopCapturer, ipcMain, session, shell, systemPreferences } = require("electron");
 const { autoUpdater } = require("electron-updater");
+const dgram = require("node:dgram");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -11,6 +12,11 @@ let selectedSourceId = null;
 let audioCaptureProcess = null;
 let turnCache = { expiresAt: 0, servers: [] };
 let logFilePath = null;
+
+const FIREWALL_RULES = {
+  tcp: "Infinity-P2P-Direct-TCP",
+  udp: "Infinity-P2P-Direct-UDP",
+};
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.quit();
@@ -91,6 +97,172 @@ async function getTurnServers() {
     console.warn("TURN indisponível; usando conexão direta", error);
     return [];
   }
+}
+
+function encodePowerShell(script) {
+  return Buffer.from(script, "utf16le").toString("base64");
+}
+
+function quotePowerShellLiteral(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function runProcess(executable, args, timeoutMs = 30_000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const finish = (result, error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (error) reject(error);
+      else resolve(result);
+    };
+    const timeout = setTimeout(() => {
+      child.kill();
+      finish(null, new Error("A solicitação de permissão demorou demais."));
+    }, timeoutMs);
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout = `${stdout}${chunk}`.slice(-65_536); });
+    child.stderr.on("data", (chunk) => { stderr = `${stderr}${chunk}`.slice(-65_536); });
+    child.once("error", (error) => finish(null, error));
+    child.once("close", (code) => finish({ code: code ?? -1, stdout, stderr }));
+  });
+}
+
+async function getWindowsFirewallStatus() {
+  if (process.platform !== "win32") {
+    return { state: "system-managed", blockedRules: 0, allowedRules: 0 };
+  }
+  if (!app.isPackaged || process.env.INFINITY_E2E === "1") {
+    return { state: "allowed", blockedRules: 0, allowedRules: 2 };
+  }
+
+  const program = quotePowerShellLiteral(process.execPath);
+  const script = `
+$ErrorActionPreference = 'Stop'
+$program = ${program}
+$rules = @(Get-NetFirewallApplicationFilter -Program $program -ErrorAction SilentlyContinue |
+  Get-NetFirewallRule -ErrorAction SilentlyContinue |
+  Where-Object { $_.Direction -eq 'Inbound' -and $_.Enabled -eq 'True' })
+$blocked = @($rules | Where-Object { $_.Action -eq 'Block' }).Count
+$allowed = @($rules | Where-Object { $_.Action -eq 'Allow' }).Count
+$activeProfiles = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue |
+  Where-Object { $_.IPv4Connectivity -ne 'Disconnected' -or $_.IPv6Connectivity -ne 'Disconnected' } |
+  ForEach-Object { [string]$_.NetworkCategory } |
+  Select-Object -Unique)
+$matchingAllowed = @($rules | Where-Object {
+  if ($_.Action -ne 'Allow') { return $false }
+  $ruleProfile = [string]$_.Profile
+  return $ruleProfile -eq 'Any' -or @($activeProfiles | Where-Object { $ruleProfile -match $_ }).Count -gt 0
+}).Count
+[pscustomobject]@{ blockedRules = $blocked; allowedRules = $allowed; matchingAllowedRules = $matchingAllowed } | ConvertTo-Json -Compress
+`;
+
+  try {
+    const result = await runProcess("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(script)]);
+    if (result.code !== 0) throw new Error(result.stderr.trim() || `PowerShell ${result.code}`);
+    const parsed = JSON.parse(result.stdout.trim());
+    return {
+      state: parsed.blockedRules > 0 ? "blocked" : parsed.matchingAllowedRules >= 2 ? "allowed" : "missing",
+      blockedRules: parsed.blockedRules,
+      allowedRules: parsed.allowedRules,
+      matchingAllowedRules: parsed.matchingAllowedRules,
+    };
+  } catch (error) {
+    logEvent("firewall-status-error", { message: error.message });
+    return { state: "unavailable", blockedRules: 0, allowedRules: 0 };
+  }
+}
+
+async function requestWindowsFirewallPermission() {
+  if (process.platform !== "win32") return { state: "system-managed" };
+  if (!app.isPackaged || process.env.INFINITY_E2E === "1") {
+    return { state: "allowed", blockedRules: 0, allowedRules: 2 };
+  }
+
+  const program = quotePowerShellLiteral(process.execPath);
+  const tcpRule = quotePowerShellLiteral(FIREWALL_RULES.tcp);
+  const udpRule = quotePowerShellLiteral(FIREWALL_RULES.udp);
+  const elevatedScript = `
+$ErrorActionPreference = 'Stop'
+$program = ${program}
+$associatedRules = @(Get-NetFirewallApplicationFilter -Program $program -ErrorAction SilentlyContinue |
+  Get-NetFirewallRule -ErrorAction SilentlyContinue |
+  Where-Object { $_.Direction -eq 'Inbound' })
+foreach ($rule in $associatedRules) {
+  if ($rule.Action -eq 'Block') {
+    Set-NetFirewallRule -Name $rule.Name -Action Allow -Enabled True -Profile Any
+  }
+}
+Get-NetFirewallRule -Name ${tcpRule}, ${udpRule} -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+New-NetFirewallRule -Name ${tcpRule} -DisplayName 'Infinity - conexão direta (TCP)' -Group 'Infinity' -Direction Inbound -Action Allow -Enabled True -Profile Private,Public -Protocol TCP -Program $program -EdgeTraversalPolicy Allow | Out-Null
+New-NetFirewallRule -Name ${udpRule} -DisplayName 'Infinity - conexão direta (UDP)' -Group 'Infinity' -Direction Inbound -Action Allow -Enabled True -Profile Private,Public -Protocol UDP -Program $program -EdgeTraversalPolicy Allow | Out-Null
+`;
+  const launcherScript = `
+$ErrorActionPreference = 'Stop'
+try {
+  $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand','${encodePowerShell(elevatedScript)}')
+  exit $process.ExitCode
+} catch {
+  [Console]::Error.WriteLine($_.Exception.Message)
+  exit 1
+}
+`;
+
+  try {
+    const result = await runProcess(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(launcherScript)],
+      180_000,
+    );
+    if (result.code !== 0) {
+      const message = result.stderr.trim();
+      const cancelled = /cancel|cancelad|1223/i.test(message);
+      logEvent("firewall-permission-denied", { cancelled, message: message.slice(0, 300) });
+      return { state: cancelled ? "cancelled" : "failed" };
+    }
+    const status = await getWindowsFirewallStatus();
+    logEvent("firewall-permission-result", status);
+    return status;
+  } catch (error) {
+    logEvent("firewall-permission-error", { message: error.message });
+    return { state: "failed" };
+  }
+}
+
+function requestMacLocalNetworkPermission() {
+  if (process.platform !== "darwin") return Promise.resolve({ state: "system-managed" });
+
+  return new Promise((resolve) => {
+    const socket = dgram.createSocket("udp4");
+    let settled = false;
+    const finish = (state) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try {
+        socket.close(() => undefined);
+      } catch {
+        // The permission attempt can fail before the UDP socket finishes binding.
+      }
+      logEvent("mac-local-network-permission", { state });
+      resolve({ state });
+    };
+    const timeout = setTimeout(() => finish("requested"), 1_500);
+    socket.once("error", () => finish("requested"));
+    socket.bind(0, () => {
+      socket.connect(9, "224.0.0.251", () => finish("requested"));
+    });
+  });
 }
 
 function sendUpdateStatus(status) {
@@ -342,11 +514,37 @@ app.whenReady().then(() => {
     if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
     return process.platform === "darwin" ? systemPreferences.getMediaAccessStatus("screen") : "granted";
   });
+  ipcMain.handle("capture:request-permission", async (event) => {
+    if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
+    if (process.platform !== "darwin") return "granted";
+    await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 1, height: 1 } });
+    return systemPreferences.getMediaAccessStatus("screen");
+  });
   ipcMain.handle("capture:open-settings", async (event) => {
     if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
     if (process.platform !== "darwin") return false;
     await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
     return true;
+  });
+  ipcMain.handle("connection:get-permission", (event) => {
+    if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
+    return getWindowsFirewallStatus();
+  });
+  ipcMain.handle("connection:request-permission", (event) => {
+    if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
+    return process.platform === "win32" ? requestWindowsFirewallPermission() : requestMacLocalNetworkPermission();
+  });
+  ipcMain.handle("connection:open-settings", async (event) => {
+    if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");
+    if (process.platform === "darwin") {
+      await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork");
+      return true;
+    }
+    if (process.platform === "win32") {
+      await shell.openExternal("ms-settings:windowsdefender-firewall");
+      return true;
+    }
+    return false;
   });
   ipcMain.handle("clipboard:write-text", async (event, value) => {
     if (event.sender !== mainWindow?.webContents) throw new Error("Origem IPC não autorizada");

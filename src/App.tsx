@@ -202,9 +202,13 @@ function App() {
   const [connectionState, setConnectionState] = useState("Preparando");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [version, setVersion] = useState("0.9.2");
+  const [version, setVersion] = useState("0.9.4");
   const [platform, setPlatform] = useState<NodeJS.Platform | "">("");
-  const [showMacGuide, setShowMacGuide] = useState(false);
+  const [showPermissionGuide, setShowPermissionGuide] = useState(false);
+  const [connectionPermission, setConnectionPermission] = useState<ConnectionPermissionStatus | null>(null);
+  const [capturePermission, setCapturePermission] = useState<"not-determined" | "granted" | "denied" | "restricted" | "unknown">("unknown");
+  const [permissionBusy, setPermissionBusy] = useState<"connection" | "capture" | null>(null);
+  const [permissionNotice, setPermissionNotice] = useState("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [viewerVolume, setViewerVolume] = useState(1);
   const [showLocalPreview, setShowLocalPreview] = useState(false);
@@ -236,6 +240,7 @@ function App() {
   const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const audioPcmUnsubscribeRef = useRef<(() => void) | null>(null);
   const audioStatusUnsubscribeRef = useRef<(() => void) | null>(null);
+  const pendingPermissionActionRef = useRef<(() => void) | null>(null);
 
   const quality = useMemo(
     () => QUALITY_PRESETS.find((preset) => preset.key === qualityKey) ?? QUALITY_PRESETS[0],
@@ -244,13 +249,83 @@ function App() {
 
   useEffect(() => {
     window.telaDesktop?.getVersion().then(setVersion).catch(() => undefined);
-    window.telaDesktop?.getPlatform().then((detectedPlatform) => {
+    window.telaDesktop?.getPlatform().then(async (detectedPlatform) => {
       setPlatform(detectedPlatform);
-      if (detectedPlatform === "darwin" && localStorage.getItem("infinity-mac-guide-seen") !== "1") {
-        setShowMacGuide(true);
+      const [connectionStatus, screenStatus] = await Promise.all([
+        window.telaDesktop.getConnectionPermission().catch(() => ({ state: "unavailable" as const })),
+        window.telaDesktop.getCapturePermission().catch(() => "unknown" as const),
+      ]);
+      setConnectionPermission(connectionStatus);
+      setCapturePermission(screenStatus);
+      if (detectedPlatform === "win32" && connectionStatus.state === "allowed") {
+        localStorage.setItem("infinity-permissions-v1-seen", "1");
+        const pendingAction = pendingPermissionActionRef.current;
+        if (pendingAction) {
+          pendingPermissionActionRef.current = null;
+          setShowPermissionGuide(false);
+          pendingAction();
+        }
+      } else if (
+        (detectedPlatform === "win32" || detectedPlatform === "darwin") &&
+        localStorage.getItem("infinity-permissions-v1-seen") !== "1"
+      ) {
+        setShowPermissionGuide(true);
       }
     }).catch(() => undefined);
     return window.telaDesktop?.onUpdateStatus?.(setUpdateStatus);
+  }, []);
+
+  const closePermissionGuide = useCallback(() => {
+    localStorage.setItem("infinity-permissions-v1-seen", "1");
+    pendingPermissionActionRef.current = null;
+    setPermissionNotice("");
+    setShowPermissionGuide(false);
+  }, []);
+
+  const requestConnectionPermission = useCallback(async () => {
+    setPermissionBusy("connection");
+    setPermissionNotice("");
+    try {
+      const result = await window.telaDesktop.requestConnectionPermission();
+      setConnectionPermission(result);
+      if (result.state === "allowed") {
+        localStorage.setItem("infinity-permissions-v1-seen", "1");
+        setShowPermissionGuide(false);
+        const pendingAction = pendingPermissionActionRef.current;
+        pendingPermissionActionRef.current = null;
+        pendingAction?.();
+      } else if (result.state === "requested") {
+        setPermissionNotice("Pedido enviado. Clique em Permitir no aviso do macOS.");
+      } else if (result.state === "cancelled") {
+        setPermissionNotice("A autorização foi cancelada. O Infinity não alterou o Firewall.");
+      } else {
+        setPermissionNotice("Não foi possível confirmar a permissão. Abra os ajustes do sistema e permita o Infinity.");
+      }
+    } catch {
+      setPermissionNotice("Não foi possível abrir a solicitação do sistema.");
+    } finally {
+      setPermissionBusy(null);
+    }
+  }, []);
+
+  const requestCapturePermission = useCallback(async () => {
+    setPermissionBusy("capture");
+    setPermissionNotice("");
+    try {
+      const result = await window.telaDesktop.requestCapturePermission();
+      setCapturePermission(result);
+      if (result === "granted") {
+        setPermissionNotice("Gravação de tela liberada.");
+      } else if (result === "denied" || result === "restricted") {
+        setPermissionNotice("O acesso já foi negado. Abra Gravação de Tela nos Ajustes e ative o Infinity.");
+      } else {
+        setPermissionNotice("Responda ao aviso do macOS. Se ele não aparecer, abra os Ajustes abaixo.");
+      }
+    } catch {
+      setPermissionNotice("Não foi possível solicitar a gravação de tela.");
+    } finally {
+      setPermissionBusy(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -540,6 +615,10 @@ function App() {
 
         if (role === "viewer" && remoteRole === "host" && !hostSessionRef.current) {
           hostSessionRef.current = { peerId, room };
+          if (connectionTimeoutRef.current !== null) {
+            window.clearTimeout(connectionTimeoutRef.current);
+            connectionTimeoutRef.current = null;
+          }
           setConnectionState(`Aguardando aprovação · ${strategy}`);
         }
       };
@@ -588,7 +667,7 @@ function App() {
 
     if (role === "viewer") {
       connectionTimeoutRef.current = window.setTimeout(() => {
-        if (remoteStreamRef.current) return;
+        if (remoteStreamRef.current || hostSessionRef.current) return;
         const sockets = [
           ...Object.values(getNostrRelaySockets()),
           ...Object.values(getMqttRelaySockets()),
@@ -768,12 +847,35 @@ function App() {
   }, [platform]);
 
   const openHostSetup = useCallback(() => {
-    const code = generateRoomCode();
-    hostRoomCodeRef.current = code;
-    setRoomCode(code);
-    setView("host-setup");
-    void loadSources();
-  }, [loadSources]);
+    const proceed = () => {
+      const code = generateRoomCode();
+      hostRoomCodeRef.current = code;
+      setRoomCode(code);
+      setView("host-setup");
+      void loadSources();
+    };
+    if (platform === "win32" && connectionPermission?.state !== "allowed") {
+      pendingPermissionActionRef.current = proceed;
+      setPermissionNotice("");
+      setShowPermissionGuide(true);
+      return;
+    }
+    proceed();
+  }, [connectionPermission?.state, loadSources, platform]);
+
+  const openViewerJoin = useCallback(() => {
+    const proceed = () => {
+      setError("");
+      setView("viewer-join");
+    };
+    if (platform === "win32" && connectionPermission?.state !== "allowed") {
+      pendingPermissionActionRef.current = proceed;
+      setPermissionNotice("");
+      setShowPermissionGuide(true);
+      return;
+    }
+    proceed();
+  }, [connectionPermission?.state, platform]);
 
   const startHosting = useCallback(async () => {
     if (!selectedSourceId || hostStartingRef.current || localStreamRef.current) return;
@@ -937,9 +1039,9 @@ function App() {
           <span>Infinity</span>
         </button>
         <div className="topbar-actions">
-          {platform === "darwin" && (
-            <button className="mac-help-button" onClick={() => setShowMacGuide(true)}>
-              <CircleHelp size={15} /> Guia do Mac
+          {(platform === "darwin" || platform === "win32") && (
+            <button className="mac-help-button" onClick={() => { setPermissionNotice(""); setShowPermissionGuide(true); }}>
+              <CircleHelp size={15} /> {platform === "darwin" ? "Guia do Mac" : "Permissões"}
             </button>
           )}
           <div className="topbar-status">
@@ -965,33 +1067,80 @@ function App() {
         </div>
       )}
 
-      {showMacGuide && (
+      {showPermissionGuide && platform && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setShowMacGuide(false);
+          if (event.target === event.currentTarget && !permissionBusy) closePermissionGuide();
         }}>
           <section className="mac-guide-dialog" role="dialog" aria-modal="true" aria-labelledby="mac-guide-title">
-            <button className="dialog-close" onClick={() => setShowMacGuide(false)} aria-label="Fechar guia">
+            <button className="dialog-close" disabled={Boolean(permissionBusy)} onClick={closePermissionGuide} aria-label="Fechar guia">
               <X size={18} />
             </button>
-            <span className="dialog-kicker">Primeiro acesso no macOS</span>
-            <h2 id="mac-guide-title">O Mac precisa conhecer o Infinity.</h2>
-            <p className="dialog-intro">Esta edição é gratuita e não possui o certificado pago da Apple. Por isso o macOS pode bloquear a primeira abertura mesmo sem ter encontrado um vírus.</p>
-            <ol className="mac-steps">
-              <li><span>01</span><p>Tente abrir o Infinity uma vez e feche o aviso do macOS.</p></li>
-              <li><span>02</span><p>Abra <strong>Ajustes do Sistema → Privacidade e Segurança</strong>.</p></li>
-              <li><span>03</span><p>Role até Segurança, clique em <strong>Abrir Mesmo Assim</strong> e confirme em Abrir.</p></li>
-              <li><span>04</span><p>Ao compartilhar, permita <strong>Gravação de Tela e Áudio do Sistema</strong> e reabra o Infinity.</p></li>
-            </ol>
-            <div className="dialog-actions">
-              <button className="button button-primary" onClick={() => void window.telaDesktop.openCaptureSettings()}>
-                <Settings2 size={17} /> Abrir Privacidade e Segurança
-              </button>
-              <button className="button button-ghost" onClick={() => {
-                localStorage.setItem("infinity-mac-guide-seen", "1");
-                setShowMacGuide(false);
-              }}>Entendi</button>
-            </div>
-            <small>Faça isso somente com o instalador recebido do seu grupo ou baixado no site oficial do projeto.</small>
+            {platform === "win32" ? (
+              <>
+                <span className="dialog-kicker">Primeiro acesso no Windows</span>
+                <h2 id="mac-guide-title">Libere a conexão direta.</h2>
+                <p className="dialog-intro">O Infinity precisa receber a conexão criptografada dos seus amigos. Ele alterará somente as regras ligadas ao próprio aplicativo.</p>
+                <div className="permission-list">
+                  <div className="permission-row">
+                    <span className="permission-icon"><Wifi size={19} /></span>
+                    <span><strong>Firewall do Windows</strong><small>TCP e UDP para redes privadas e públicas</small></span>
+                    <span className={`permission-state ${connectionPermission?.state === "allowed" ? "allowed" : "attention"}`}>
+                      {connectionPermission?.state === "allowed" ? "Liberado" : connectionPermission?.state === "blocked" ? "Bloqueado" : "Pendente"}
+                    </span>
+                  </div>
+                  <div className="permission-row">
+                    <span className="permission-icon"><ShieldCheck size={19} /></span>
+                    <span><strong>Controle do Windows</strong><small>Você confirma a mudança no aviso de administrador</small></span>
+                    <span className="permission-state">Seguro</span>
+                  </div>
+                </div>
+                {permissionNotice && <p className="permission-notice" role="status">{permissionNotice}</p>}
+                <div className="dialog-actions">
+                  <button className="button button-primary" disabled={Boolean(permissionBusy)} onClick={() => void requestConnectionPermission()}>
+                    {permissionBusy === "connection" ? <><LoaderCircle className="spin" size={17} /> Aguardando o Windows…</> : <><ShieldCheck size={17} /> Permitir conexão</>}
+                  </button>
+                  <button className="button button-ghost" disabled={Boolean(permissionBusy)} onClick={closePermissionGuide}>Agora não</button>
+                </div>
+                <small>O Infinity não desativa o Firewall e não abre portas para outros programas.</small>
+              </>
+            ) : (
+              <>
+                <span className="dialog-kicker">Primeiro acesso no macOS</span>
+                <h2 id="mac-guide-title">O Mac precisa conhecer o Infinity.</h2>
+                <p className="dialog-intro">O macOS pede duas autorizações separadas. Use os botões abaixo e escolha Permitir nos avisos do sistema.</p>
+                <div className="permission-list">
+                  <div className="permission-row mac-permission-row">
+                    <span className="permission-icon"><Wifi size={19} /></span>
+                    <span><strong>Rede local</strong><small>Encontra conexões P2P próximas sem expor seus arquivos</small></span>
+                    <button disabled={Boolean(permissionBusy)} onClick={() => void requestConnectionPermission()}>
+                      {permissionBusy === "connection" ? <LoaderCircle className="spin" size={15} /> : "Solicitar"}
+                    </button>
+                  </div>
+                  <div className="permission-row mac-permission-row">
+                    <span className="permission-icon"><MonitorUp size={19} /></span>
+                    <span><strong>Tela e áudio</strong><small>Necessário somente para quem inicia uma transmissão</small></span>
+                    <button disabled={Boolean(permissionBusy)} onClick={() => void requestCapturePermission()}>
+                      {permissionBusy === "capture" ? <LoaderCircle className="spin" size={15} /> : capturePermission === "granted" ? "Liberado" : "Solicitar"}
+                    </button>
+                  </div>
+                </div>
+                <ol className="mac-steps compact-steps">
+                  <li><span>01</span><p>Se o Mac bloqueou a instalação, abra <strong>Privacidade e Segurança</strong> e clique em <strong>Abrir Mesmo Assim</strong>.</p></li>
+                  <li><span>02</span><p>Se uma permissão já foi negada, use os atalhos abaixo para ativar o Infinity manualmente.</p></li>
+                </ol>
+                {permissionNotice && <p className="permission-notice" role="status">{permissionNotice}</p>}
+                <div className="dialog-actions permission-settings-actions">
+                  <button className="button button-secondary" onClick={() => void window.telaDesktop.openConnectionSettings()}>
+                    <Wifi size={16} /> Ajustes de rede
+                  </button>
+                  <button className="button button-secondary" onClick={() => void window.telaDesktop.openCaptureSettings()}>
+                    <Settings2 size={16} /> Ajustes de captura
+                  </button>
+                  <button className="button button-ghost" onClick={closePermissionGuide}>Entendi</button>
+                </div>
+                <small>Esta edição gratuita ainda não possui o certificado pago da Apple. Faça isso somente com o instalador recebido do seu grupo ou baixado no site oficial.</small>
+              </>
+            )}
           </section>
         </div>
       )}
@@ -1007,7 +1156,7 @@ function App() {
               <button className="button button-primary" onClick={openHostSetup}>
                 <MonitorUp size={18} /> Compartilhar minha tela
               </button>
-              <button className="button button-ghost" onClick={() => { setError(""); setView("viewer-join"); }}>
+              <button className="button button-ghost" onClick={openViewerJoin}>
                 <Users size={18} /> Entrar em uma sala
               </button>
             </div>

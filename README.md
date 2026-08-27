@@ -5,17 +5,18 @@ Aplicativo gratuito para Windows e macOS que compartilha a tela inteira e o áud
 ## Como usar
 
 1. Instale e abra o Infinity nos computadores do grupo.
-2. Quem transmite escolhe **Compartilhar minha tela**, seleciona a tela ou janela e copia o código privado.
-3. Os amigos informam o nome, colam o código em **Entrar em uma sala** e pedem para assistir.
-4. O anfitrião aprova cada pessoa e pode removê-la a qualquer momento.
-5. Quem assiste controla ou silencia o volume sem afetar os demais.
+2. No primeiro acesso, conclua o assistente de permissões. No Windows, confirme o aviso de administrador para liberar apenas o Infinity no Firewall. No Mac, permita Rede Local e Gravação de Tela quando solicitado.
+3. Quem transmite escolhe **Compartilhar minha tela**, seleciona a tela ou janela e copia o código privado.
+4. Os amigos informam o nome, colam o código em **Entrar em uma sala** e pedem para assistir.
+5. O anfitrião aprova cada pessoa e pode removê-la a qualquer momento.
+6. Quem assiste controla ou silencia o volume sem afetar os demais.
 
 O anfitrião escolhe entre 720p30, 1080p30, 1080p60 e 1440p60. A qualidade pode ser alterada ao vivo sem desconectar ninguém nem trocar o código. Para jogar, use **Jogar**: 720p, 30 FPS e 4 Mbps, com menor uso da GPU e prévia local pausada.
 
 ## Instalar no macOS
 
-- `Infinity-0.9.0-mac-arm64.dmg`: Apple Silicon (M1, M2, M3, M4 ou mais novo).
-- `Infinity-0.9.0-mac-x64.dmg`: Macs Intel.
+- `Infinity-0.9.4-mac-arm64.dmg`: Apple Silicon (M1, M2, M3, M4 ou mais novo).
+- `Infinity-0.9.4-mac-x64.dmg`: Macs Intel.
 - Recomendado: macOS 13 ou mais recente para capturar o áudio do sistema sem driver virtual.
 
 Esta edição gratuita usa assinatura ad hoc local, sem certificado Developer ID e sem notarização paga da Apple. Por isso o macOS pode bloquear a primeira abertura mesmo sem ter detectado malware.
@@ -66,14 +67,14 @@ Gerar o instalador Windows:
 npm.cmd run build
 ```
 
-O arquivo é criado em `artifacts/Infinity-Setup-0.9.0.exe`, junto de `latest.yml` e `.blockmap`. Os pacotes macOS são gerados pelo GitHub Actions ou num Mac com `npm run build:mac`.
+O arquivo é criado em `artifacts/Infinity-Setup-0.9.4.exe`, junto de `latest.yml` e `.blockmap`. Os pacotes macOS são gerados pelo GitHub Actions ou num Mac com `npm run build:mac`.
 
 ## Publicar
 
 ```powershell
 git push origin main
-git tag v0.9.0
-git push origin v0.9.0
+git tag v0.9.4
+git push origin v0.9.4
 ```
 
 O workflow **Build Infinity installers** gera Windows x64, macOS Intel e macOS Apple Silicon e publica os arquivos na Release. O workflow **Deploy Infinity website** publica a pasta `website/` no GitHub Pages.

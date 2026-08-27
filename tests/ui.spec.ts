@@ -5,8 +5,10 @@ const mockDesktop = async (
   initialUpdateStatus?: UpdateStatus,
   platform: NodeJS.Platform = "win32",
   capturePermission: "not-determined" | "granted" | "denied" | "restricted" | "unknown" = "granted",
+  connectionState: ConnectionPermissionState = "allowed",
+  connectionDelayMs = 0,
 ) => {
-  await page.addInitScript(({ updateStatus, desktopPlatform, permission }) => {
+  await page.addInitScript(({ updateStatus, desktopPlatform, permission, initialConnectionState, permissionDelay }) => {
     const thumbnail =
       "data:image/svg+xml," +
       encodeURIComponent(
@@ -18,8 +20,21 @@ const mockDesktop = async (
         getVersion: async () => "0.9.0-test",
         getPlatform: async () => desktopPlatform,
         getCapturePermission: async () => permission,
+        requestCapturePermission: async () => permission,
         openCaptureSettings: async () => {
           sessionStorage.setItem("capture-settings-opened", "true");
+          return true;
+        },
+        getConnectionPermission: async () => {
+          if (permissionDelay) await new Promise((resolve) => setTimeout(resolve, permissionDelay));
+          return { state: initialConnectionState };
+        },
+        requestConnectionPermission: async () => {
+          sessionStorage.setItem("connection-permission-requested", "true");
+          return { state: desktopPlatform === "win32" ? "allowed" : "requested" };
+        },
+        openConnectionSettings: async () => {
+          sessionStorage.setItem("connection-settings-opened", "true");
           return true;
         },
         getSources: async () => [
@@ -79,7 +94,7 @@ const mockDesktop = async (
         return stream;
       },
     });
-  }, { updateStatus: initialUpdateStatus, desktopPlatform: platform, permission: capturePermission });
+  }, { updateStatus: initialUpdateStatus, desktopPlatform: platform, permission: capturePermission, initialConnectionState: connectionState, permissionDelay: connectionDelayMs });
 };
 
 test("carrega a tela inicial e abre a configuração do anfitrião", async ({ page }) => {
@@ -122,12 +137,42 @@ test("orienta a liberar gravação de tela quando o macOS bloqueia a captura", a
   await mockDesktop(page, undefined, "darwin", "denied");
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /O Mac precisa conhecer o Infinity/i })).toBeVisible();
+  const permissionRows = page.locator(".mac-permission-row");
+  await permissionRows.nth(0).getByRole("button").click();
+  expect(await page.evaluate(() => sessionStorage.getItem("connection-permission-requested"))).toBe("true");
+  await permissionRows.nth(1).getByRole("button").click();
+  await expect(page.getByText(/O acesso já foi negado/i)).toBeVisible();
+  await page.getByRole("button", { name: "Ajustes de rede" }).click();
+  expect(await page.evaluate(() => sessionStorage.getItem("connection-settings-opened"))).toBe("true");
   await page.getByRole("button", { name: "Entendi" }).click();
   await page.getByRole("button", { name: /Compartilhar minha tela/i }).click();
 
   await expect(page.getByText(/macOS bloqueou a gravação de tela/i)).toBeVisible();
   await page.getByRole("button", { name: "Abrir ajustes" }).click();
   expect(await page.evaluate(() => sessionStorage.getItem("capture-settings-opened"))).toBe("true");
+});
+
+test("explica e solicita a liberação do Firewall antes de usar o P2P no Windows", async ({ page }) => {
+  await mockDesktop(page, undefined, "win32", "granted", "blocked");
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Libere a conexão direta." })).toBeVisible();
+  await expect(page.getByText("Bloqueado", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Permitir conexão" }).click();
+
+  expect(await page.evaluate(() => sessionStorage.getItem("connection-permission-requested"))).toBe("true");
+  await expect(page.getByRole("heading", { name: "Libere a conexão direta." })).toHaveCount(0);
+  await page.getByRole("button", { name: /Compartilhar minha tela/i }).click();
+  await expect(page.getByRole("heading", { name: /O que você quer mostrar/i })).toBeVisible();
+});
+
+test("continua a ação automaticamente quando a checagem do Firewall termina", async ({ page }) => {
+  await mockDesktop(page, undefined, "win32", "granted", "allowed", 500);
+  await page.goto("/");
+  await page.getByRole("button", { name: /Compartilhar minha tela/i }).click();
+
+  await expect(page.getByRole("heading", { name: /O que você quer mostrar/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Libere a conexão direta." })).toHaveCount(0);
 });
 
 test("valida o código de uma sala antes de conectar", async ({ page }) => {

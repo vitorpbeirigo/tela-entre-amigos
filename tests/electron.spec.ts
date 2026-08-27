@@ -9,8 +9,8 @@ const launchTela = (profile: string) => {
   const packagedExecutable = process.env.TELA_PACKAGED_EXE;
   return electron.launch(
     packagedExecutable
-      ? { executablePath: packagedExecutable, args: [`--user-data-dir=${path.join(os.tmpdir(), profile)}`] }
-      : { args: [path.resolve("."), `--user-data-dir=${path.join(os.tmpdir(), profile)}`], cwd: path.resolve(".") },
+      ? { executablePath: packagedExecutable, args: [`--user-data-dir=${path.join(os.tmpdir(), profile)}`], env: { ...process.env, INFINITY_E2E: "1" } }
+      : { args: [path.resolve("."), `--user-data-dir=${path.join(os.tmpdir(), profile)}`], cwd: path.resolve("."), env: { ...process.env, INFINITY_E2E: "1" } },
   );
 };
 
