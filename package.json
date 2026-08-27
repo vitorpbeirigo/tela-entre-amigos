@@ -1,6 +1,6 @@
 {
   "name": "infinity-entre-amigos",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "private": true,
   "description": "Infinity: compartilhamento de tela P2P em alta qualidade para amigos.",
   "main": "electron/main.cjs",
@@ -22,6 +22,7 @@
     "@fontsource/dm-mono": "^5.3.0",
     "@fontsource/instrument-serif": "^5.3.0",
     "@trystero-p2p/mqtt": "^0.25.3",
+    "@trystero-p2p/torrent": "^0.25.3",
     "electron-updater": "^6.8.9",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",

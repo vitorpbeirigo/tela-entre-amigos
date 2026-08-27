@@ -14,16 +14,22 @@ const launchTela = (profile: string) => {
   );
 };
 
-const isAudioHelperRunning = () => {
-  if (process.platform !== "win32") return false;
+const getAudioHelperPids = () => {
+  if (process.platform !== "win32") return new Set<string>();
   const output = execFileSync("tasklist.exe", ["/FI", "IMAGENAME eq TelaAudioCapture.exe", "/FO", "CSV", "/NH"], {
     encoding: "utf8",
     windowsHide: true,
   });
-  return output.toLowerCase().includes("telaaudiocapture.exe");
+  return new Set(
+    output.split(/\r?\n/).flatMap((line) => {
+      const match = line.match(/^"TelaAudioCapture\.exe","(\d+)"/i);
+      return match ? [match[1]] : [];
+    }),
+  );
 };
 
 test("o aplicativo Electron lista fontes reais e inicia a captura", async () => {
+  const existingAudioHelpers = getAudioHelperPids();
   const app = await launchTela(`tela-e2e-single-${Date.now()}`);
 
   try {
@@ -49,6 +55,7 @@ test("o aplicativo Electron lista fontes reais e inicia a captura", async () => 
 
     await window.getByRole("button", { name: /Iniciar transmissão/i }).click();
     await expect(window.getByRole("heading", { name: /Sua tela está sendo compartilhada/i })).toBeVisible({ timeout: 15_000 });
+    await expect(window.getByText("Sala aberta · P2P direto", { exact: true })).toBeVisible();
     await expect(window.getByText("Prévia pausada", { exact: true })).toBeVisible();
     await window.getByRole("button", { name: "Mostrar prévia" }).click();
     await expect.poll(async () =>
@@ -67,12 +74,16 @@ test("o aplicativo Electron lista fontes reais e inicia a captura", async () => 
   } finally {
     await app.close();
     if (process.platform === "win32") {
-      await expect.poll(isAudioHelperRunning, { timeout: 5_000 }).toBe(false);
+      await expect.poll(
+        () => [...getAudioHelperPids()].filter((pid) => !existingAudioHelpers.has(pid)),
+        { timeout: 5_000 },
+      ).toEqual([]);
     }
   }
 });
 
 test("dois processos Electron conectam anfitrião e espectador", async () => {
+  const existingAudioHelpers = getAudioHelperPids();
   const runId = Date.now();
   const hostApp = await launchTela(`tela-e2e-host-${runId}`);
   const viewerApp = await launchTela(`tela-e2e-viewer-${runId}`);
@@ -101,7 +112,10 @@ test("dois processos Electron conectam anfitrião e espectador", async () => {
   } finally {
     await Promise.allSettled([hostApp.close(), viewerApp.close()]);
     if (process.platform === "win32") {
-      await expect.poll(isAudioHelperRunning, { timeout: 5_000 }).toBe(false);
+      await expect.poll(
+        () => [...getAudioHelperPids()].filter((pid) => !existingAudioHelpers.has(pid)),
+        { timeout: 5_000 },
+      ).toEqual([]);
     }
   }
 });

@@ -39,6 +39,10 @@ import {
   getRelaySockets as getMqttRelaySockets,
   joinRoom as joinMqttRoom,
 } from "@trystero-p2p/mqtt";
+import {
+  getRelaySockets as getTorrentRelaySockets,
+  joinRoom as joinTorrentRoom,
+} from "@trystero-p2p/torrent";
 
 type View = "home" | "host-setup" | "host-live" | "viewer-join" | "viewer-live";
 type Role = "host" | "viewer";
@@ -198,7 +202,7 @@ function App() {
   const [connectionState, setConnectionState] = useState("Preparando");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [version, setVersion] = useState("0.9.1");
+  const [version, setVersion] = useState("0.9.2");
   const [platform, setPlatform] = useState<NodeJS.Platform | "">("");
   const [showMacGuide, setShowMacGuide] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
@@ -407,10 +411,11 @@ function App() {
     const onJoinError = (strategy: string) => ({ error }: { error: string }) => {
       console.error(`[${strategy}] falha ao conectar`, error);
       connectionErrorsRef.current.add(strategy);
-      if (connectionErrorsRef.current.size >= 2 && !remoteStreamRef.current) {
-        setConnectionState("Rede bloqueou a conexão");
-        setError("Os computadores se encontraram, mas a rede bloqueou a rota direta. Tente liberar o Infinity no Firewall do Windows e entrar novamente.");
-      }
+      window.telaDesktop.logEvent("discovery-error", {
+        role,
+        strategy,
+        message: String(error).slice(0, 240),
+      });
     };
 
     const strategyRooms = [
@@ -421,6 +426,10 @@ function App() {
       {
         strategy: "MQTT",
         room: joinMqttRoom(roomConfig, roomId, { onJoinError: onJoinError("MQTT") }),
+      },
+      {
+        strategy: "Torrent",
+        room: joinTorrentRoom(roomConfig, roomId, { onJoinError: onJoinError("Torrent") }),
       },
     ];
     roomRefs.current = strategyRooms.map(({ room }) => room);
@@ -457,7 +466,16 @@ function App() {
         );
       };
 
-      room.onPeerJoin = (peerId) => announceRole(peerId);
+      room.onPeerJoin = (peerId) => {
+        connectionErrorsRef.current.delete(strategy);
+        window.telaDesktop.logEvent("peer-discovered", {
+          role,
+          strategy,
+          peer: peerId.slice(0, 8),
+        });
+        if (role === "viewer") setError("");
+        announceRole(peerId);
+      };
       room.onPeerLeave = (peerId) => {
         if (role === "host") {
           const connection = viewerConnectionsRef.current.get(peerId);
@@ -574,12 +592,20 @@ function App() {
         const sockets = [
           ...Object.values(getNostrRelaySockets()),
           ...Object.values(getMqttRelaySockets()),
+          ...Object.values(getTorrentRelaySockets()),
         ] as WebSocket[];
         const openRelays = sockets.filter((socket) => socket.readyState === WebSocket.OPEN).length;
-        setConnectionState("Ainda procurando");
+        const failedStrategies = [...connectionErrorsRef.current].join(",") || "nenhuma";
+        window.telaDesktop.logEvent("connection-timeout", {
+          role,
+          openRelays,
+          failedStrategies,
+          directMode: turnConfig.length === 0,
+        });
+        setConnectionState(openRelays > 0 ? "Sala não encontrada" : "Descoberta indisponível");
         setError(openRelays > 0
           ? "A sala não respondeu. Confirme o código, mantenha o anfitrião transmitindo e verifique se os dois estão usando a versão mais recente."
-          : "Não foi possível acessar os serviços de sala. Verifique a internet ou o Firewall do Windows e tente novamente.");
+          : "Não foi possível acessar os canais públicos de descoberta. Verifique a internet e tente novamente em alguns instantes.");
       }, CONNECTION_TIMEOUT_MS);
     }
   }, [configureVideoSender, syncViewerParticipants, viewerName]);
@@ -787,7 +813,7 @@ function App() {
       setLocalStream(stream);
       setRoomCode(code);
       setView("host-live");
-      setConnectionState(turnServers.length ? "Sala aberta · TURN pronto" : "Sala aberta");
+      setConnectionState(turnServers.length ? "Sala aberta · TURN pronto" : "Sala aberta · P2P direto");
       window.telaDesktop.logEvent("capture-start", {
         quality: quality.key,
         width: quality.width,

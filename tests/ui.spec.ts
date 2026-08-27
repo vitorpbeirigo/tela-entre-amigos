@@ -189,10 +189,12 @@ test("abre uma única sala mesmo com clique duplo e mantém o código estável",
 
   await page.getByRole("button", { name: /Iniciar transmissão/i }).dblclick();
   await expect(page.getByRole("heading", { name: /Sua tela está sendo compartilhada/i })).toBeVisible();
+  await expect(page.getByText("Sala aberta · P2P direto", { exact: true })).toBeVisible();
   const code = (await page.locator(".room-code-copy span").textContent())!.trim();
 
   await page.waitForTimeout(2_500);
   await expect(page.locator(".room-code-copy span")).toHaveText(code);
+  await expect(page.getByText(/Os computadores se encontraram, mas a rede bloqueou/i)).toHaveCount(0);
   expect(await page.evaluate(() => sessionStorage.getItem("capture-start-count"))).toBe("1");
 });
 
