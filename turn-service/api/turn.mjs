@@ -33,7 +33,7 @@ export default async function handler(request, response) {
     return;
   }
 
-  if (!String(request.headers["user-agent"] ?? "").startsWith("Tela/")) {
+  if (!/^(Tela|Infinity)\//.test(String(request.headers["user-agent"] ?? ""))) {
     json(response, 403, { error: "Cliente não autorizado" });
     return;
   }

@@ -15,7 +15,7 @@ const mockDesktop = async (
 
     Object.defineProperty(window, "telaDesktop", {
       value: {
-        getVersion: async () => "0.8.0-test",
+        getVersion: async () => "0.9.0-test",
         getPlatform: async () => desktopPlatform,
         getCapturePermission: async () => permission,
         openCaptureSettings: async () => {
@@ -113,6 +113,8 @@ test("mantém a home utilizável na menor janela suportada", async ({ page }) =>
 test("orienta a liberar gravação de tela quando o macOS bloqueia a captura", async ({ page }) => {
   await mockDesktop(page, undefined, "darwin", "denied");
   await page.goto("/");
+  await expect(page.getByRole("heading", { name: /O Mac precisa conhecer o Infinity/i })).toBeVisible();
+  await page.getByRole("button", { name: "Entendi" }).click();
   await page.getByRole("button", { name: /Compartilhar minha tela/i }).click();
 
   await expect(page.getByText(/macOS bloqueou a gravação de tela/i)).toBeVisible();

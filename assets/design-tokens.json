@@ -1,0 +1,23 @@
+{
+  "brand": "Infinity",
+  "colors": {
+    "void": "#000000",
+    "midnight": "#191919",
+    "graphite": "#282828",
+    "charcoal": "#363636",
+    "white": "#FFFFFF",
+    "electricCyan": "#19D0E8",
+    "cyanSoft": "#44CCFF",
+    "deepTeal": "#062F34"
+  },
+  "typography": {
+    "display": "Instrument Serif",
+    "interface": "DM Mono",
+    "body": "Geist"
+  },
+  "radius": {
+    "functional": "20px",
+    "card": "32px",
+    "pill": "999px"
+  }
+}

@@ -1,4 +1,4 @@
-name: Build Tela installers
+name: Build Infinity installers
 
 on:
   workflow_dispatch:
@@ -32,10 +32,10 @@ jobs:
       - name: Upload Windows artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: Tela-Windows-x64
+          name: Infinity-Windows-x64
           path: |
-            artifacts/Tela-Setup-*.exe
-            artifacts/Tela-Setup-*.blockmap
+            artifacts/Infinity-Setup-*.exe
+            artifacts/Infinity-Setup-*.blockmap
             artifacts/latest.yml
 
   macos:
@@ -61,19 +61,19 @@ jobs:
 
       - name: Verify macOS application signatures
         run: |
-          codesign --verify --deep --strict --verbose=2 release/mac/Tela.app
-          codesign --verify --deep --strict --verbose=2 release/mac-arm64/Tela.app
-          codesign -dv --verbose=4 release/mac/Tela.app 2>&1 | grep -q "Signature=adhoc"
-          codesign -dv --verbose=4 release/mac-arm64/Tela.app 2>&1 | grep -q "Signature=adhoc"
+          codesign --verify --deep --strict --verbose=2 release/mac/Infinity.app
+          codesign --verify --deep --strict --verbose=2 release/mac-arm64/Infinity.app
+          codesign -dv --verbose=4 release/mac/Infinity.app 2>&1 | grep -q "Signature=adhoc"
+          codesign -dv --verbose=4 release/mac-arm64/Infinity.app 2>&1 | grep -q "Signature=adhoc"
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: Tela-macOS
+          name: Infinity-macOS
           path: |
-            release/Tela-*-mac-*.dmg
-            release/Tela-*-mac-*.zip
-            release/Tela-*-mac-*.blockmap
+            release/Infinity-*-mac-*.dmg
+            release/Infinity-*-mac-*.zip
+            release/Infinity-*-mac-*.blockmap
             release/latest-mac.yml
 
   release:

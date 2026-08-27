@@ -45,7 +45,7 @@ async function fetchJson(url, timeoutMs = 5_000) {
   try {
     const response = await fetch(url, {
       signal: controller.signal,
-      headers: { "User-Agent": `Tela/${app.getVersion()}` },
+      headers: { "User-Agent": `Infinity/${app.getVersion()}` },
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return await response.json();
@@ -169,7 +169,7 @@ function startDiscordFilteredAudio() {
   stopDiscordFilteredAudio();
   const executable = getAudioCaptureExecutable();
   if (!fs.existsSync(executable)) {
-    throw new Error("O componente de áudio do Tela não foi encontrado. Reinstale a versão mais recente.");
+    throw new Error("O componente de áudio do Infinity não foi encontrado. Reinstale a versão mais recente.");
   }
 
   return new Promise((resolve, reject) => {
@@ -247,7 +247,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     backgroundColor: "#08090a",
-    title: "Tela",
+    title: "Infinity",
     autoHideMenuBar: true,
     show: false,
     webPreferences: {

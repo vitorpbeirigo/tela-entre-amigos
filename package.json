@@ -1,8 +1,8 @@
 {
-  "name": "tela-entre-amigos",
-  "version": "0.8.0",
+  "name": "infinity-entre-amigos",
+  "version": "0.9.0",
   "private": true,
-  "description": "Compartilhamento de tela P2P em alta qualidade para pequenos grupos.",
+  "description": "Infinity: compartilhamento de tela P2P em alta qualidade para amigos.",
   "main": "electron/main.cjs",
   "author": "Greg Preto",
   "scripts": {
@@ -18,7 +18,9 @@
     "build": "npm run build:win"
   },
   "dependencies": {
-    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource/dm-mono": "^5.3.0",
+    "@fontsource/instrument-serif": "^5.3.0",
     "@trystero-p2p/mqtt": "^0.25.3",
     "electron-updater": "^6.8.9",
     "lucide-react": "^0.468.0",
@@ -42,7 +44,7 @@
   },
   "build": {
     "appId": "com.gregpreto.tela",
-    "productName": "Tela",
+    "productName": "Infinity",
     "directories": {
       "output": "release"
     },
@@ -74,7 +76,7 @@
           ]
         }
       ],
-      "artifactName": "Tela-Setup-${version}.${ext}"
+      "artifactName": "Infinity-Setup-${version}.${ext}"
     },
     "mac": {
       "icon": "assets/icon.png",
@@ -97,9 +99,9 @@
           ]
         }
       ],
-      "artifactName": "Tela-${version}-mac-${arch}.${ext}",
+      "artifactName": "Infinity-${version}-mac-${arch}.${ext}",
       "extendInfo": {
-        "NSAudioCaptureUsageDescription": "O Tela precisa capturar o áudio do sistema para transmiti-lo aos participantes da sala."
+        "NSAudioCaptureUsageDescription": "O Infinity precisa capturar o áudio do sistema para transmiti-lo aos participantes da sala."
       }
     },
     "nsis": {
@@ -107,7 +109,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Tela"
+      "shortcutName": "Infinity"
     }
   }
 }

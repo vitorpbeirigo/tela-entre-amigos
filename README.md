@@ -1,48 +1,49 @@
-# Tela
+# Infinity
 
-Aplicativo Windows e macOS de compartilhamento de tela P2P em alta qualidade para pequenos grupos. Não precisa de cadastro, banco de dados ou servidor próprio.
+Aplicativo gratuito para Windows e macOS que compartilha a tela inteira e o áudio em alta qualidade diretamente entre amigos. Não precisa de cadastro, banco de dados ou servidor central de vídeo.
 
 ## Como usar
 
-1. Instale e abra o Tela nos computadores do grupo.
-2. Quem vai transmitir clica em **Compartilhar minha tela**, escolhe a tela ou janela e copia o código da sala.
+1. Instale e abra o Infinity nos computadores do grupo.
+2. Quem transmite escolhe **Compartilhar minha tela**, seleciona a tela ou janela e copia o código privado.
 3. Os amigos informam o nome, colam o código em **Entrar em uma sala** e pedem para assistir.
-4. O anfitrião aprova cada pessoa antes que o vídeo seja enviado e pode removê-la a qualquer momento.
-5. Quem assiste pode ajustar ou silenciar o volume da transmissão sem afetar os demais participantes.
+4. O anfitrião aprova cada pessoa e pode removê-la a qualquer momento.
+5. Quem assiste controla ou silencia o volume sem afetar os demais.
 
-O anfitrião escolhe entre 720p a 30 FPS, 1080p a 30 FPS, 1080p a 60 FPS e 1440p a 60 FPS. A qualidade pode ser alterada durante a transmissão sem desconectar ninguém ou trocar o código da sala. A qualidade real também depende do computador, da tela selecionada e da rota de internet entre os participantes.
+O anfitrião escolhe entre 720p30, 1080p30, 1080p60 e 1440p60. A qualidade pode ser alterada ao vivo sem desconectar ninguém nem trocar o código. Para jogar, use **Jogar**: 720p, 30 FPS e 4 Mbps, com menor uso da GPU e prévia local pausada.
 
-Para transmitir enquanto joga, use o modo **Jogar**: 720p, 30 FPS e 4 Mbps. Ele prioriza os FPS do jogo, pausa a prévia local por padrão e permite reabri-la quando necessário. O Tela também impede instâncias duplicadas e encerra o capturador de áudio automaticamente se o processo principal fechar ou travar.
+## Instalar no macOS
 
-> Os instaladores ainda não possuem certificado de assinatura de código. No Windows, o SmartScreen pode pedir **Mais informações** e **Executar assim mesmo**. No macOS, abra o aplicativo com o botão direito e escolha **Abrir**; se necessário, use **Ajustes do Sistema > Privacidade e Segurança > Abrir Mesmo Assim**. Faça isso somente com arquivos deste repositório ou recebidos diretamente do responsável pelo grupo.
+- `Infinity-0.9.0-mac-arm64.dmg`: Apple Silicon (M1, M2, M3, M4 ou mais novo).
+- `Infinity-0.9.0-mac-x64.dmg`: Macs Intel.
+- Recomendado: macOS 13 ou mais recente para capturar o áudio do sistema sem driver virtual.
 
-## Usar no macOS
+Esta edição gratuita usa assinatura ad hoc local, sem certificado Developer ID e sem notarização paga da Apple. Por isso o macOS pode bloquear a primeira abertura mesmo sem ter detectado malware.
 
-- `Tela-0.8.0-mac-arm64.dmg`: Macs com Apple Silicon (M1, M2, M3, M4 ou mais novo).
-- `Tela-0.8.0-mac-x64.dmg`: Macs Intel.
-- Recomendado: macOS 13 ou mais recente para capturar também o áudio do sistema sem instalar um driver virtual.
+1. Arraste o Infinity para **Aplicativos** e tente abri-lo uma vez.
+2. Abra **Ajustes do Sistema > Privacidade e Segurança**.
+3. Role até Segurança, clique em **Abrir Mesmo Assim** e confirme em **Abrir**.
+4. Ao transmitir, permita **Gravação de Tela e Áudio do Sistema**, feche completamente o Infinity e abra novamente.
 
-Na primeira transmissão, o macOS pedirá acesso à gravação de tela e ao áudio do sistema. Autorize o **Tela** em **Ajustes do Sistema > Privacidade e Segurança**, feche o aplicativo completamente e abra novamente. Se a permissão estiver bloqueada, o próprio Tela mostra um botão para abrir esses ajustes.
-
-Como esta edição é gratuita, ela usa uma assinatura ad hoc local em vez de um certificado pago da Apple. As atualizações do Mac são manuais: baixe o `.dmg` mais recente na página de Releases e substitua o aplicativo anterior. A atualização automática continua disponível no Windows.
-
-Se o macOS ainda mostrar **“mover para o lixo”**, mova primeiro o Tela para **Aplicativos** e execute no Terminal:
+Se **Abrir Mesmo Assim** não aparecer, use apenas como último recurso:
 
 ```bash
-xattr -dr com.apple.quarantine "/Applications/Tela.app"
+xattr -dr com.apple.quarantine "/Applications/Infinity.app"
 ```
 
-Esse comando remove a quarentena somente desse aplicativo. Depois, clique com o botão direito no Tela e escolha **Abrir**.
+O comando remove a quarentena somente desse aplicativo. Faça isso apenas com o arquivo baixado pelo site ou repositório oficial. As atualizações do Mac continuam manuais; no Windows, são automáticas.
 
-## Arquitetura
+## Arquitetura e privacidade
 
 - Electron + React para captura e interface.
-- WebRTC para mídia direta entre os computadores.
-- Trystero com relays públicos Nostr e MQTT em paralelo para descoberta redundante dos computadores.
-- Fallback TURN carregado por configuração remota quando a conexão direta é bloqueada.
-- Atualizações automáticas distribuídas por GitHub Releases.
-- Renderer isolado com sandbox do Chromium, CSP restritiva e IPC validado.
-- Sem banco de dados e sem armazenamento de mídia.
+- WebRTC para mídia P2P criptografada em trânsito.
+- Trystero com Nostr e MQTT em paralelo para descoberta redundante.
+- Fallback TURN carregado por configuração remota quando a rota direta falha.
+- Aprovação manual de cada espectador.
+- Renderer isolado, sandbox do Chromium, CSP restritiva e IPC validado.
+- Sem contas, banco de dados ou armazenamento da transmissão.
+
+Relays de descoberta não transportam o vídeo. O TURN só transporta mídia quando a conexão direta é bloqueada e, nesse caso, consome banda do provedor configurado.
 
 ## Desenvolvimento
 
@@ -51,49 +52,30 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-## Gerar os instaladores
+Verificações:
+
+```powershell
+npm.cmd run typecheck
+npm.cmd run test:ui
+npm.cmd run build:web
+```
+
+Gerar o instalador Windows:
 
 ```powershell
 npm.cmd run build
 ```
 
-No Windows, o instalador será gerado em `artifacts/Tela-Setup-0.8.0.exe`, junto de `latest.yml` e do arquivo `.blockmap` usados pelo atualizador.
+O arquivo é criado em `artifacts/Infinity-Setup-0.9.0.exe`, junto de `latest.yml` e `.blockmap`. Os pacotes macOS são gerados pelo GitHub Actions ou num Mac com `npm run build:mac`.
 
-Os pacotes macOS devem ser gerados num Mac ou pelo workflow do GitHub Actions:
-
-```bash
-npm run build:mac
-```
-
-O comando produz `.dmg` e `.zip` separados para Intel (`x64`) e Apple Silicon (`arm64`) dentro de `release/`. A versão gratuita usa assinatura ad hoc, sem certificado Developer ID e sem notarização paga da Apple.
-
-## Publicar no GitHub
-
-O workflow incluído compila o instalador em uma máquina Windows do GitHub:
+## Publicar
 
 ```powershell
-git remote add origin URL_DO_SEU_REPOSITORIO
-git push -u origin main
-git tag v0.8.0
-git push origin v0.8.0
+git push origin main
+git tag v0.9.0
+git push origin v0.9.0
 ```
 
-Ao enviar uma tag `v*`, o GitHub Actions compila Windows, macOS Intel e macOS Apple Silicon e cria uma Release com todos os instaladores anexados. Também é possível executar **Build Tela installers** manualmente na aba Actions para baixar os arquivos como artefatos.
+O workflow **Build Infinity installers** gera Windows x64, macOS Intel e macOS Apple Silicon e publica os arquivos na Release. O workflow **Deploy Infinity website** publica a pasta `website/` no GitHub Pages.
 
-No Windows, o Tela verifica Releases, baixa novas versões em segundo plano e mostra o botão **Reiniciar agora** quando a atualização estiver pronta. No macOS gratuito e não assinado, cada nova versão precisa ser instalada manualmente.
-
-## Ativar o fallback TURN
-
-O arquivo `network.json` é consultado em cada sessão. Defina `turnCredentialsUrl` com um endpoint HTTPS que devolva `{ "iceServers": [...] }`. O endpoint deve gerar credenciais temporárias e manter a chave administrativa do provedor apenas no servidor. Alterar esse arquivo no GitHub ativa ou troca o TURN sem recompilar o aplicativo.
-
-## Privacidade e custo
-
-- O vídeo e o áudio trafegam diretamente entre os computadores por WebRTC e são criptografados em trânsito.
-- Relays públicos Nostr e MQTT são usados somente para os participantes se encontrarem e negociarem a conexão.
-- O aplicativo não grava nem armazena a transmissão.
-- A conexão direta continua sem custo. TURN só transporta mídia quando a rede direta falha e consome a franquia do provedor.
-- O código da sala funciona como senha e o anfitrião ainda precisa aprovar cada entrada. Compartilhe o código apenas com quem deve entrar e crie uma nova sala a cada sessão.
-
-## Limite conhecido do MVP
-
-Esta versão usa descoberta descentralizada e conexão P2P direta. Redes corporativas, CGNATs ou firewalls que bloqueiem a rota direta podem impedir a conexão. Um fallback TURN resolveria esses casos, mas exigiria um serviço de retransmissão e teria custo de banda.
+O `appId` antigo e o identificador da rede P2P foram preservados intencionalmente para que usuários da versão Tela recebam a atualização e continuem encontrando as mesmas salas durante a transição.

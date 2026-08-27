@@ -1,42 +1,57 @@
-# Tela — constelação entre amigos
+# Infinity — velvet library with a single blue spark
 
-Direção adaptada da referência “Your workplace has the answer. Just ask Dala for it.” fornecida para o projeto.
+## Ideia central
 
-## Princípios
+Infinity é uma sala privada de alta qualidade para amigos. A identidade transmite silêncio, proximidade e precisão: um ambiente preto editorial com um único ponto de energia ciano conectando duas telas.
 
-- Preto absoluto é o espaço do produto; hierarquia vem de escala, cor e respiro.
-- Uma única ação preenchida por tela usa violeta `#8052ff`.
-- Âmbar `#ffb829` identifica contexto, etapas e pequenos destaques.
-- Títulos usam peso 400 e tracking negativo; corpo usa Inter variável em peso 200–300.
-- Contêineres não devem parecer cartões empilhados. Vídeo e miniaturas podem ter raio de 24 px por serem conteúdo visual.
-- A constelação triangular representa computadores encontrando uns aos outros sem um servidor de vídeo central.
-- Estados humanos (“Conectado”, “Transmitindo”, “Procurando”) continuam acima dos detalhes técnicos.
+## Marca
 
-## Tokens
+- Nome visível: **Infinity**.
+- Símbolo: laço infinito formado por duas fitas/telas conectadas.
+- O ciano aparece principalmente no cruzamento do símbolo.
+- O identificador técnico `com.gregpreto.tela` permanece por compatibilidade com instalações antigas.
 
-| Papel | Valor |
-| --- | --- |
-| Canvas | `#000000` |
-| Texto principal | `#ffffff` |
-| Texto secundário | `#bdbdbd` |
-| Texto discreto | `#9a9a9a` |
-| Ação principal | `#8052ff` |
-| Destaque | `#ffb829` |
-| Profundidade cromática | `#15846e` |
-| Erro | `#ff6f7d` |
+## Cores
 
-## Forma, tipo e movimento
+- Void: `#000000`
+- Midnight: `#191919`
+- Graphite: `#282828`
+- Charcoal: `#363636`
+- White: `#FFFFFF`
+- Electric cyan: `#19D0E8`
+- Cyan soft: `#44CCFF`
+- Deep teal: `#062F34`
 
-- Unidade base de 6 px e raios principais de 24 px.
-- Títulos entre 42 e 92 px, peso 400, tracking `-0.04em`.
-- Texto de apoio entre 15 e 18 px, peso 200–300.
-- Botões primários em formato pill; ações secundárias como texto ou superfície fantasma.
-- Partículas triangulares têm movimento lento e são desativadas com `prefers-reduced-motion`.
-- Alvos interativos mantêm pelo menos 44 px e foco visível.
+O ciano é usado em dois ou três pontos por tela. Botões principais são brancos sobre preto.
 
-## Fluxo preservado
+## Tipografia
 
-1. Escolher compartilhar ou assistir.
-2. Selecionar fonte, qualidade e áudio.
-3. Abrir a sala e copiar o convite.
-4. Assistir, entrar em tela cheia ou encerrar.
+- Títulos editoriais: Instrument Serif, itálico.
+- Interface, códigos e metadados: DM Mono.
+- Textos: Geist.
+
+## Composição
+
+- Fundo preto sem ruído visual.
+- Títulos grandes, alinhados à esquerda e com bastante respiro.
+- Palavra Infinity fantasma atrás do hero.
+- Cards físicos em grafite, bordas de 18 a 40 px e luz ciano contida.
+- Parágrafos nunca centralizados fora de estados vazios.
+- Pílulas completas para ações; áreas funcionais mantêm cantos de 18 a 24 px.
+
+## Movimento e acessibilidade
+
+- Entradas curtas de 240 a 360 ms e hover de no máximo 2 px.
+- Nada pulsa continuamente fora de indicadores de conexão.
+- `prefers-reduced-motion` remove movimento decorativo.
+- Contraste mínimo WCAG AA e foco visível em ciano.
+- Alvos interativos com pelo menos 44 px quando possível.
+- A informação nunca depende apenas de cor.
+
+## Voz
+
+Direta, calma e íntima. Falar como um amigo competente, sem linguagem corporativa.
+
+- “Sua tela. Sem distância.”
+- “Só a sua turma entra.”
+- “Nada é gravado ou armazenado.”

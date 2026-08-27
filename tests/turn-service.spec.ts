@@ -3,7 +3,7 @@ import handler from "../turn-service/api/turn.mjs";
 
 const makeRequest = (overrides: Record<string, unknown> = {}) => ({
   method: "GET",
-  headers: { "user-agent": "Tela/0.2.0", "x-forwarded-for": `127.0.0.${Math.floor(Math.random() * 200) + 1}` },
+  headers: { "user-agent": "Infinity/0.9.0", "x-forwarded-for": `127.0.0.${Math.floor(Math.random() * 200) + 1}` },
   socket: {},
   ...overrides,
 });
@@ -20,7 +20,7 @@ const makeResponse = () => {
   };
 };
 
-test("endpoint TURN rejeita clientes que não são o Tela", async () => {
+test("endpoint TURN rejeita clientes que não são o Infinity", async () => {
   const { response, result } = makeResponse();
   await handler(makeRequest({ headers: { "user-agent": "Mozilla/5.0" } }), response);
   expect(result.statusCode).toBe(403);

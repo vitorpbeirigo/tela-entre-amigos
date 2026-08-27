@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   Check,
   ChevronRight,
+  CircleHelp,
   Clipboard,
   Copy,
   Download,
@@ -16,6 +17,7 @@ import {
   RefreshCw,
   ScreenShare,
   ScreenShareOff,
+  Settings2,
   ShieldCheck,
   Sparkles,
   UserCheck,
@@ -121,7 +123,7 @@ const QUALITY_PRESETS: QualityPreset[] = [
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const TRYSTERO_APP_ID = "com.gregpreto.tela.p2p.v1";
 const CONNECTION_TIMEOUT_MS = 20_000;
-const PARTICLE_COLORS = ["#8052ff", "#ffb829", "#15846e", "#b96cff", "#5d8dff", "#ff5caa"];
+const PARTICLE_COLORS = ["#19d0e8", "#44ccff", "#617176", "#ffffff", "#062f34"];
 function seededValue(index: number, salt: number) {
   const value = Math.sin(index * 12.9898 + salt * 78.233) * 43758.5453;
   return value - Math.floor(value);
@@ -195,8 +197,9 @@ function App() {
   const [connectionState, setConnectionState] = useState("Preparando");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [version, setVersion] = useState("0.8.0");
+  const [version, setVersion] = useState("0.9.0");
   const [platform, setPlatform] = useState<NodeJS.Platform | "">("");
+  const [showMacGuide, setShowMacGuide] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [viewerVolume, setViewerVolume] = useState(1);
   const [showLocalPreview, setShowLocalPreview] = useState(false);
@@ -234,7 +237,12 @@ function App() {
 
   useEffect(() => {
     window.telaDesktop?.getVersion().then(setVersion).catch(() => undefined);
-    window.telaDesktop?.getPlatform().then(setPlatform).catch(() => undefined);
+    window.telaDesktop?.getPlatform().then((detectedPlatform) => {
+      setPlatform(detectedPlatform);
+      if (detectedPlatform === "darwin" && localStorage.getItem("infinity-mac-guide-seen") !== "1") {
+        setShowMacGuide(true);
+      }
+    }).catch(() => undefined);
     return window.telaDesktop?.onUpdateStatus?.(setUpdateStatus);
   }, []);
 
@@ -398,7 +406,7 @@ function App() {
       connectionErrorsRef.current.add(strategy);
       if (connectionErrorsRef.current.size >= 2 && !remoteStreamRef.current) {
         setConnectionState("Rede bloqueou a conexão");
-        setError("Os computadores se encontraram, mas a rede bloqueou a rota direta. Tente liberar o Tela no Firewall do Windows e entrar novamente.");
+        setError("Os computadores se encontraram, mas a rede bloqueou a rota direta. Tente liberar o Infinity no Firewall do Windows e entrar novamente.");
       }
     };
 
@@ -707,14 +715,14 @@ function App() {
       const permission = await window.telaDesktop.getCapturePermission();
       if (permission === "denied" || permission === "restricted") {
         setSources([]);
-        setError("O macOS bloqueou a gravação de tela. Abra Privacidade e Segurança, permita o Tela e reinicie o aplicativo.");
+        setError("O macOS bloqueou a gravação de tela. Abra Privacidade e Segurança, permita o Infinity e reinicie o aplicativo.");
         return;
       }
       const availableSources = await window.telaDesktop.getSources();
       if (platform === "darwin" && availableSources.length === 0) {
         const currentPermission = await window.telaDesktop.getCapturePermission();
         if (currentPermission !== "granted") {
-          setError("O macOS ainda não liberou a gravação de tela. Autorize o Tela em Privacidade e Segurança e abra o aplicativo novamente.");
+          setError("O macOS ainda não liberou a gravação de tela. Autorize o Infinity em Privacidade e Segurança e abra o aplicativo novamente.");
           return;
         }
       }
@@ -723,7 +731,7 @@ function App() {
       setSelectedSourceId((current) => current || entireScreen?.id || availableSources[0]?.id || "");
     } catch {
       setError(platform === "darwin"
-        ? "Não foi possível acessar as telas. Autorize o Tela em Privacidade e Segurança > Gravação de Tela e Áudio do Sistema."
+        ? "Não foi possível acessar as telas. Autorize o Infinity em Privacidade e Segurança > Gravação de Tela e Áudio do Sistema."
         : "Não foi possível listar as telas e janelas deste computador.");
     } finally {
       setSourcesLoading(false);
@@ -784,7 +792,7 @@ function App() {
       setView("host-setup");
       const permissionDenied = startError instanceof DOMException && startError.name === "NotAllowedError";
       setError(permissionDenied && platform === "darwin"
-        ? "O macOS não liberou a captura. Permita o Tela em Privacidade e Segurança > Gravação de Tela e Áudio do Sistema e abra o app novamente."
+        ? "O macOS não liberou a captura. Permita o Infinity em Privacidade e Segurança > Gravação de Tela e Áudio do Sistema e abra o app novamente."
         : startError instanceof Error ? startError.message : "Não foi possível iniciar a transmissão.");
     }
   }, [cleanup, createFilteredAudioTrack, joinP2PRoom, platform, quality, selectedSourceId]);
@@ -882,13 +890,20 @@ function App() {
       <ParticleField particles={AMBIENT_PARTICLES} className="ambient-particles" />
       <header className="topbar">
         <button className="brand" onClick={leaveSession} aria-label="Voltar ao início">
-          <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
-          <span>Tela</span>
+          <img className="brand-logo" src="/brand/infinity-app-icon.png" alt="" />
+          <span>Infinity</span>
         </button>
-        <div className="topbar-status">
-          <span className="status-dot" />
-          Transmissão privada
-          <span className="version">v{version}</span>
+        <div className="topbar-actions">
+          {platform === "darwin" && (
+            <button className="mac-help-button" onClick={() => setShowMacGuide(true)}>
+              <CircleHelp size={15} /> Guia do Mac
+            </button>
+          )}
+          <div className="topbar-status">
+            <span className="status-dot" />
+            P2P privado
+            <span className="version">v{version}</span>
+          </div>
         </div>
       </header>
 
@@ -897,7 +912,7 @@ function App() {
           <span className="update-icon"><Download size={16} /></span>
           <span>
             <strong>{updateStatus.state === "downloaded" ? `Versão ${updateStatus.version} pronta` : "Baixando atualização"}</strong>
-            <small>{updateStatus.state === "downloading" ? `${updateStatus.percent ?? 0}% concluído` : "O Tela se mantém atualizado automaticamente."}</small>
+            <small>{updateStatus.state === "downloading" ? `${updateStatus.percent ?? 0}% concluído` : "O Infinity se mantém atualizado automaticamente no Windows."}</small>
           </span>
           {updateStatus.state === "downloaded" && (
             <button className="button button-primary" onClick={() => void window.telaDesktop.installUpdate()}>
@@ -907,12 +922,44 @@ function App() {
         </div>
       )}
 
+      {showMacGuide && (
+        <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setShowMacGuide(false);
+        }}>
+          <section className="mac-guide-dialog" role="dialog" aria-modal="true" aria-labelledby="mac-guide-title">
+            <button className="dialog-close" onClick={() => setShowMacGuide(false)} aria-label="Fechar guia">
+              <X size={18} />
+            </button>
+            <span className="dialog-kicker">Primeiro acesso no macOS</span>
+            <h2 id="mac-guide-title">O Mac precisa conhecer o Infinity.</h2>
+            <p className="dialog-intro">Esta edição é gratuita e não possui o certificado pago da Apple. Por isso o macOS pode bloquear a primeira abertura mesmo sem ter encontrado um vírus.</p>
+            <ol className="mac-steps">
+              <li><span>01</span><p>Tente abrir o Infinity uma vez e feche o aviso do macOS.</p></li>
+              <li><span>02</span><p>Abra <strong>Ajustes do Sistema → Privacidade e Segurança</strong>.</p></li>
+              <li><span>03</span><p>Role até Segurança, clique em <strong>Abrir Mesmo Assim</strong> e confirme em Abrir.</p></li>
+              <li><span>04</span><p>Ao compartilhar, permita <strong>Gravação de Tela e Áudio do Sistema</strong> e reabra o Infinity.</p></li>
+            </ol>
+            <div className="dialog-actions">
+              <button className="button button-primary" onClick={() => void window.telaDesktop.openCaptureSettings()}>
+                <Settings2 size={17} /> Abrir Privacidade e Segurança
+              </button>
+              <button className="button button-ghost" onClick={() => {
+                localStorage.setItem("infinity-mac-guide-seen", "1");
+                setShowMacGuide(false);
+              }}>Entendi</button>
+            </div>
+            <small>Faça isso somente com o instalador recebido do seu grupo ou baixado no site oficial do projeto.</small>
+          </section>
+        </div>
+      )}
+
       {view === "home" && (
         <section className="home-grid page-enter">
+          <div className="hero-wordmark" aria-hidden="true">Infinity</div>
           <div className="hero-copy">
-            <div className="eyebrow"><Sparkles size={14} /> Feito para a sua turma</div>
-            <h1>Sua tela.<br /><span>Entre amigos.</span></h1>
-            <p>Compartilhe o monitor inteiro com áudio, em alta qualidade, direto para os computadores dos seus amigos.</p>
+            <div className="eyebrow"><Sparkles size={14} /> Só a sua turma entra</div>
+            <h1>Sua tela.<br /><span>Sem distância.</span></h1>
+            <p>Vídeo e áudio em alta qualidade, direto entre os computadores dos seus amigos. Sem cadastro, sem gravação e sem servidor de vídeo no meio.</p>
             <div className="home-actions">
               <button className="button button-primary" onClick={openHostSetup}>
                 <MonitorUp size={18} /> Compartilhar minha tela
@@ -929,13 +976,13 @@ function App() {
           </div>
 
           <div className="hero-visual" aria-hidden="true">
-            <div className="constellation-orbit orbit-outer" />
-            <div className="constellation-orbit orbit-inner" />
-            <ParticleField particles={CONSTELLATION_PARTICLES} className="particle-brain" />
-            <span className="constellation-note note-top">ROTA PRIVADA</span>
-            <span className="constellation-note note-bottom"><span className="status-dot" /> 1440P · 60 FPS</span>
-            <div className="constellation-core">
-              <ScreenShare size={26} strokeWidth={1.4} />
+            <div className="hero-device-card">
+              <span className="device-label">PRIVATE DISPLAY LINK</span>
+              <img src="/brand/infinity-app-icon.png" alt="" />
+              <div className="device-readout">
+                <span><i className="status-dot" /> conectado</span>
+                <strong>1440P · 60 FPS</strong>
+              </div>
             </div>
           </div>
         </section>

@@ -1,0 +1,13 @@
+:root {
+  --infinity-void: #000000;
+  --infinity-midnight: #191919;
+  --infinity-graphite: #282828;
+  --infinity-charcoal: #363636;
+  --infinity-white: #ffffff;
+  --infinity-cyan: #19d0e8;
+  --infinity-cyan-soft: #44ccff;
+  --infinity-deep-teal: #062f34;
+  --infinity-font-display: "Instrument Serif", Georgia, serif;
+  --infinity-font-interface: "DM Mono", ui-monospace, monospace;
+  --infinity-font-body: "Geist Variable", Geist, system-ui, sans-serif;
+}
