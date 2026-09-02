@@ -145,19 +145,20 @@ test("dois espectadores retornam sem nova aprovação e remoção revoga o acess
     await page.getByRole("button", { name: /Assistir agora/i }).click();
   };
   const decodedFrames = (page: Page) => page.locator(".viewer-stage video").evaluate((video: HTMLVideoElement) => video.getVideoPlaybackQuality().totalVideoFrames);
-  const audioBytes = (page: Page) => page.evaluate(async () => {
-    let bytes = 0;
-    for (const pc of (window as any).__testPeers as RTCPeerConnection[]) {
+  const audioSamples = (page: Page) => page.evaluate(async () => {
+    const samples: Record<string, number> = {};
+    for (const [index, pc] of ((window as any).__testPeers as RTCPeerConnection[]).entries()) {
       if (pc.connectionState !== "connected") continue;
       const report = await pc.getStats();
-      report.forEach((stat) => { if (stat.type === "inbound-rtp" && stat.kind === "audio") bytes += stat.bytesReceived ?? 0; });
+      report.forEach((stat) => {
+        if (stat.type === "inbound-rtp" && stat.kind === "audio") samples[`${index}:${stat.id}`] = stat.bytesReceived ?? 0;
+      });
     }
-    return bytes;
+    return samples;
   });
   const expectLive = async (page: Page) => {
     await expect(page.locator(".watch-room")).toContainText("Conectado", { timeout: 35_000 });
     const beforeFrames = await decodedFrames(page);
-    const beforeAudio = await audioBytes(page);
     try {
       await expect.poll(() => decodedFrames(page), { timeout: 10_000 }).toBeGreaterThan(beforeFrames + 3);
     } catch (error) {
@@ -177,7 +178,15 @@ test("dois espectadores retornam sem nova aprovação e remoção revoga o acess
       }
       throw error;
     }
-    await expect.poll(() => audioBytes(page), { timeout: 10_000 }).toBeGreaterThan(beforeAudio);
+    // Counters restart on a new transport. Summing old and new PCs can decrease
+    // during cleanup, even while audio is arriving correctly in the new room.
+    let previousAudio = await audioSamples(page);
+    await expect.poll(async () => {
+      const current = await audioSamples(page);
+      const growing = Object.entries(current).some(([key, bytes]) => previousAudio[key] !== undefined && bytes > previousAudio[key]);
+      previousAudio = current;
+      return growing;
+    }, { timeout: 10_000 }).toBe(true);
   };
   try {
     const host = await hostApp.firstWindow();
