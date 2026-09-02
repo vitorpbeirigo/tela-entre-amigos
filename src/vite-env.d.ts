@@ -42,7 +42,7 @@ interface Window {
     selectSource(sourceId: string): Promise<boolean>;
     startDiscordFilteredAudio(): Promise<{ discordExcluded: boolean }>;
     stopDiscordFilteredAudio(): Promise<boolean>;
-    onAudioPcm(callback: (chunk: Uint8Array) => void): () => void;
+    onAudioPcm(callback: (chunk: Uint8Array, capturedAt?: number) => void): () => void;
     onAudioStatus(callback: (status: FilteredAudioStatus) => void): () => void;
     getVersion(): Promise<string>;
     getPlatform(): Promise<NodeJS.Platform>;

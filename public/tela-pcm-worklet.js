@@ -1,18 +1,32 @@
 class TelaPcmQueueProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.queue = [];
-    this.offset = 0;
+    this.targetSamples = Math.round(sampleRate * 0.04) * 2;
+    this.capacity = Math.round(sampleRate * 0.12) * 2;
+    this.samples = new Float32Array(this.capacity);
+    this.readIndex = 0;
     this.queuedSamples = 0;
+    this.droppedSamples = 0;
+    this.underrunFrames = 0;
+    this.framesSinceReport = 0;
     this.port.onmessage = ({ data }) => {
-      if (!(data instanceof Float32Array) || data.length === 0) return;
-      if (this.queuedSamples > 384000) {
-        this.queue = [];
-        this.offset = 0;
-        this.queuedSamples = 0;
+      if (!(data instanceof Float32Array) || !data.length || data.length % 2) return;
+      let start = 0;
+      const total = this.queuedSamples + data.length;
+      if (total > this.capacity) {
+        const drop = total - this.targetSamples;
+        const queuedDrop = Math.min(drop, this.queuedSamples);
+        this.readIndex = (this.readIndex + queuedDrop) % this.capacity;
+        this.queuedSamples -= queuedDrop;
+        start = drop - queuedDrop;
+        this.droppedSamples += drop;
       }
-      this.queue.push(data);
-      this.queuedSamples += data.length;
+      let writeIndex = (this.readIndex + this.queuedSamples) % this.capacity;
+      for (let i = start; i < data.length; i++) {
+        this.samples[writeIndex] = data[i];
+        writeIndex = (writeIndex + 1) % this.capacity;
+      }
+      this.queuedSamples += data.length - start;
     };
   }
 
@@ -21,24 +35,21 @@ class TelaPcmQueueProcessor extends AudioWorkletProcessor {
     if (!output || output.length < 2) return true;
     const left = output[0];
     const right = output[1];
-    let outputFrame = 0;
-
-    while (outputFrame < left.length && this.queue.length > 0) {
-      const samples = this.queue[0];
-      const availableFrames = Math.floor((samples.length - this.offset) / 2);
-      const framesToCopy = Math.min(left.length - outputFrame, availableFrames);
-      for (let frame = 0; frame < framesToCopy; frame += 1) {
-        const sampleIndex = this.offset + frame * 2;
-        left[outputFrame + frame] = samples[sampleIndex];
-        right[outputFrame + frame] = samples[sampleIndex + 1];
-      }
-      outputFrame += framesToCopy;
-      this.offset += framesToCopy * 2;
-      this.queuedSamples -= framesToCopy * 2;
-      if (this.offset >= samples.length) {
-        this.queue.shift();
-        this.offset = 0;
-      }
+    left.fill(0);
+    right.fill(0);
+    const frames = Math.min(left.length, this.queuedSamples / 2);
+    for (let frame = 0; frame < frames; frame++) {
+      left[frame] = this.samples[this.readIndex];
+      right[frame] = this.samples[(this.readIndex + 1) % this.capacity];
+      this.readIndex = (this.readIndex + 2) % this.capacity;
+    }
+    this.queuedSamples -= frames * 2;
+    this.underrunFrames += left.length - frames;
+    this.framesSinceReport += left.length;
+    if (this.framesSinceReport >= sampleRate) {
+      this.framesSinceReport = 0;
+      this.port.postMessage({ queuedMs: this.queuedSamples / 2 / sampleRate * 1000,
+        droppedFrames: this.droppedSamples / 2, underrunFrames: this.underrunFrames });
     }
     return true;
   }

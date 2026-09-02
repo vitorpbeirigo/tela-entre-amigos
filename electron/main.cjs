@@ -365,7 +365,7 @@ function startDiscordFilteredAudio() {
 
     child.stdout.on("data", (chunk) => {
       if (child !== audioCaptureProcess || !mainWindow || mainWindow.isDestroyed()) return;
-      mainWindow.webContents.send("audio:pcm", new Uint8Array(chunk));
+      mainWindow.webContents.send("audio:pcm", new Uint8Array(chunk), Date.now());
     });
 
     child.stderr.setEncoding("utf8");

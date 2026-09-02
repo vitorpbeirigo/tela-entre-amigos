@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld("telaDesktop", {
   startDiscordFilteredAudio: () => ipcRenderer.invoke("audio:start-discord-filtered"),
   stopDiscordFilteredAudio: () => ipcRenderer.invoke("audio:stop-discord-filtered"),
   onAudioPcm: (callback) => {
-    const listener = (_event, chunk) => callback(chunk);
+    const listener = (_event, chunk, capturedAt) => callback(chunk, capturedAt);
     ipcRenderer.on("audio:pcm", listener);
     return () => ipcRenderer.removeListener("audio:pcm", listener);
   },

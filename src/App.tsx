@@ -33,6 +33,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import {
   getRelaySockets as getNostrRelaySockets,
   joinRoom as joinNostrRoom,
+  selfId,
   type Room,
 } from "trystero";
 import {
@@ -43,6 +44,8 @@ import {
   getRelaySockets as getTorrentRelaySockets,
   joinRoom as joinTorrentRoom,
 } from "@trystero-p2p/torrent";
+import { createRejoinProof, forgetRoomGrant, isGrant, isSecret, loadRoomGrant, randomSecret, saveRoomGrant, verifyRejoinProof, type RoomGrant } from "./room-access";
+import { createPlaybackStream } from "./playback-stream";
 
 type View = "home" | "host-setup" | "host-live" | "viewer-join" | "viewer-live";
 type Role = "host" | "viewer";
@@ -83,6 +86,7 @@ interface ViewerRoute {
 interface ViewerConnection extends ViewerParticipant {
   routes: ViewerRoute[];
   activeRoom?: Room;
+  grantId?: string;
 }
 
 const QUALITY_PRESETS: QualityPreset[] = [
@@ -241,6 +245,15 @@ function App() {
   const audioPcmUnsubscribeRef = useRef<(() => void) | null>(null);
   const audioStatusUnsubscribeRef = useRef<(() => void) | null>(null);
   const pendingPermissionActionRef = useRef<(() => void) | null>(null);
+  const sessionEpochRef = useRef(0);
+  const leavingRoomsRef = useRef<Promise<unknown>>(Promise.resolve());
+  const sessionTimersRef = useRef(new Set<number>());
+  const hostGrantsRef = useRef(new Map<string, RoomGrant>());
+  const deniedGrantIdsRef = useRef(new Set<string>());
+  const startViewerStreamRef = useRef<((connection: ViewerConnection, route?: ViewerRoute) => Promise<void>) | null>(null);
+  const joiningRef = useRef(false);
+  const disposePlaybackRef = useRef<(() => void) | null>(null);
+  const liveQualityRef = useRef(QUALITY_PRESETS[0]);
 
   const quality = useMemo(
     () => QUALITY_PRESETS.find((preset) => preset.key === qualityKey) ?? QUALITY_PRESETS[0],
@@ -340,6 +353,7 @@ function App() {
     remoteVideoRef.current.srcObject = remoteStream;
     remoteVideoRef.current.volume = viewerVolume;
     remoteVideoRef.current.muted = viewerVolume === 0;
+    if (remoteStream) void remoteVideoRef.current.play().catch(() => undefined);
   }, [remoteStream, view, viewerVolume]);
 
   const changeViewerVolume = useCallback((nextVolume: number) => {
@@ -366,6 +380,7 @@ function App() {
     audioDestinationRef.current?.stream.getTracks().forEach((track) => track.stop());
     audioDestinationRef.current = null;
     audioWorkletRef.current?.disconnect();
+    audioWorkletRef.current?.port.close();
     audioWorkletRef.current = null;
     const context = audioContextRef.current;
     audioContextRef.current = null;
@@ -373,7 +388,7 @@ function App() {
     void window.telaDesktop.stopDiscordFilteredAudio().catch(() => undefined);
   }, []);
 
-  const createFilteredAudioTrack = useCallback(async () => {
+  const createFilteredAudioTrack = useCallback(async (epoch: number) => {
     if (platform !== "win32") {
       throw new Error("O modo automático sem Discord está disponível apenas no Windows.");
     }
@@ -382,6 +397,7 @@ function App() {
     audioContextRef.current = context;
     const moduleUrl = new URL("tela-pcm-worklet.js", window.location.href).toString();
     await context.audioWorklet.addModule(moduleUrl);
+    if (sessionEpochRef.current !== epoch) throw new Error("Captura cancelada");
 
     const worklet = new AudioWorkletNode(context, "tela-pcm-queue", {
       numberOfInputs: 0,
@@ -394,7 +410,7 @@ function App() {
     audioDestinationRef.current = destination;
 
     let remainder = new Uint8Array(0);
-    audioPcmUnsubscribeRef.current = window.telaDesktop.onAudioPcm((chunk) => {
+    audioPcmUnsubscribeRef.current = window.telaDesktop.onAudioPcm((chunk, capturedAt) => {
       const incoming = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
       const bytes = remainder.length ? new Uint8Array(remainder.length + incoming.length) : incoming;
       if (remainder.length) {
@@ -404,6 +420,8 @@ function App() {
       const usableBytes = bytes.length - (bytes.length % 4);
       remainder = usableBytes < bytes.length ? bytes.slice(usableBytes) : new Uint8Array(0);
       if (usableBytes === 0) return;
+      // Don't replay old IPC packets after a busy renderer catches up.
+      if (capturedAt && Date.now() - capturedAt > 150) return;
 
       const view = new DataView(bytes.buffer, bytes.byteOffset, usableBytes);
       const samples = new Float32Array(usableBytes / 2);
@@ -420,9 +438,11 @@ function App() {
 
     try {
       await window.telaDesktop.startDiscordFilteredAudio();
+      if (sessionEpochRef.current !== epoch) throw new Error("Captura cancelada");
       await context.resume();
+      if (sessionEpochRef.current !== epoch) throw new Error("Captura cancelada");
     } catch (audioError) {
-      stopFilteredAudio();
+      if (audioContextRef.current === context) stopFilteredAudio();
       throw audioError;
     }
 
@@ -435,6 +455,14 @@ function App() {
   }, [platform, stopFilteredAudio]);
 
   const configureVideoSender = useCallback(async (pc: RTCPeerConnection, preset: QualityPreset) => {
+    const audioSender = pc.getSenders().find((item) => item.track?.kind === "audio");
+    if (audioSender) {
+      const audioParameters = audioSender.getParameters();
+      audioParameters.encodings = audioParameters.encodings?.length ? audioParameters.encodings : [{}];
+      audioParameters.encodings[0].maxBitrate = 128_000;
+      audioParameters.encodings[0].priority = "high";
+      await audioSender.setParameters(audioParameters).catch(() => undefined);
+    }
     const sender = pc.getSenders().find((item) => item.track?.kind === "video");
     if (!sender) return;
 
@@ -477,6 +505,19 @@ function App() {
     stream?: MediaStream,
     initialQuality: QualityPreset = QUALITY_PRESETS[0],
   ) => {
+    const epoch = sessionEpochRef.current;
+    const isCurrent = () => sessionEpochRef.current === epoch;
+    liveQualityRef.current = initialQuality;
+    let savedGrant = role === "viewer" ? loadRoomGrant(code) : null;
+    const hostRoutes = new Map<Room, { peerId: string; strategy: string }>();
+    const pendingStreams = new Map<Room, { stream: MediaStream; peerId: string; strategy: string }>();
+    const later = (callback: () => void, ms: number) => {
+      const timer = window.setTimeout(() => {
+        sessionTimersRef.current.delete(timer);
+        if (isCurrent()) callback();
+      }, ms);
+      sessionTimersRef.current.add(timer);
+    };
     const roomId = code.replaceAll("-", "");
     const roomConfig = {
       appId: TRYSTERO_APP_ID,
@@ -486,6 +527,7 @@ function App() {
     };
 
     const onJoinError = (strategy: string) => ({ error }: { error: string }) => {
+      if (!isCurrent()) return;
       console.error(`[${strategy}] falha ao conectar`, error);
       connectionErrorsRef.current.add(strategy);
       window.telaDesktop.logEvent("discovery-error", {
@@ -512,38 +554,75 @@ function App() {
     roomRefs.current = strategyRooms.map(({ room }) => room);
 
     const startViewerStream = async (connection: ViewerConnection, preferredRoute?: ViewerRoute) => {
-      if (!stream || connection.status !== "approved") return;
+      if (!isCurrent() || !stream || connection.status !== "approved") return;
       const route = preferredRoute ?? connection.routes[0];
-      if (!route) return;
+      if (!route || connection.activeRoom === route.room) return;
+
+      const previousRoom = connection.activeRoom;
+      if (previousRoom?.getPeers()[connection.peerId]) previousRoom.removeStream(stream, { target: connection.peerId });
 
       connection.activeRoom = route.room;
       viewerRoomsRef.current.set(connection.peerId, route.room);
       syncViewerParticipants();
       setConnectionState(`Transmitindo · ${route.strategy}`);
-      await Promise.allSettled(connection.routes.map((candidate) =>
-        candidate.sendAdmission({ status: "approved" }, { target: connection.peerId }),
-      ));
-      route.room.addStream(stream, {
-        target: connection.peerId,
-        metadata: { kind: "screen", strategy: route.strategy },
-      });
-      window.setTimeout(() => {
-        const pc = route.room.getPeers()[connection.peerId];
-        if (pc) void configureVideoSender(pc, initialQuality);
-      }, 500);
+      try {
+        await route.sendAdmission({ status: "approved", grant: hostGrantsRef.current.get(connection.grantId ?? "") }, { target: connection.peerId });
+        if (!isCurrent() || connection.status !== "approved" || connection.activeRoom !== route.room || viewerConnectionsRef.current.get(connection.peerId) !== connection) return;
+        await Promise.all(route.room.addStream(stream, { target: connection.peerId, metadata: { kind: "screen", strategy: route.strategy } }));
+        if (!isCurrent() || connection.status !== "approved" || connection.activeRoom !== route.room || viewerConnectionsRef.current.get(connection.peerId) !== connection) {
+          route.room.removeStream(stream, { target: connection.peerId });
+          return;
+        }
+        later(() => {
+          const pc = route.room.getPeers()[connection.peerId];
+          if (pc && connection.activeRoom === route.room) void configureVideoSender(pc, liveQualityRef.current);
+        }, 500);
+      } catch {
+        if (!isCurrent() || viewerConnectionsRef.current.get(connection.peerId) !== connection || connection.activeRoom !== route.room) return;
+        connection.activeRoom = undefined;
+        viewerRoomsRef.current.delete(connection.peerId);
+        const fallback = connection.routes.find((candidate) => candidate.room !== route.room && candidate.room.getPeers()[connection.peerId]);
+        if (fallback) later(() => void startViewerStream(connection, fallback), 500);
+        else setConnectionState("Reconectando espectador");
+      }
+    };
+    startViewerStreamRef.current = startViewerStream;
+
+    const acceptStream = (room: Room) => {
+      const pending = pendingStreams.get(room);
+      if (!isCurrent() || !pending || viewerAdmissionStateRef.current !== "approved" || hostSessionRef.current?.peerId !== pending.peerId) return;
+      if (remoteStreamRef.current && hostSessionRef.current.room !== room) return;
+      hostSessionRef.current = { peerId: pending.peerId, room };
+      disposePlaybackRef.current?.();
+      const playback = createPlaybackStream(pending.stream);
+      disposePlaybackRef.current = playback.dispose;
+      remoteStreamRef.current = playback.stream;
+      setRemoteStream(playback.stream);
+      setConnectionState(`Conectado · ${pending.strategy}`);
+      setError("");
+      for (const receiver of room.getPeers()[pending.peerId]?.getReceivers() ?? []) {
+        if ("jitterBufferTarget" in receiver) {
+          try { receiver.jitterBufferTarget = 50; } catch { /* browser manages unsupported targets */ }
+        }
+      }
+      if (connectionTimeoutRef.current !== null) window.clearTimeout(connectionTimeoutRef.current);
     };
 
     for (const { room, strategy } of strategyRooms) {
       const presence = room.makeAction("presence");
       const admission = room.makeAction("admission");
+      const rejoin = room.makeAction("rejoin");
+      const challenges = new Map<string, { nonce: string; grantId: string; expires: number }>();
       const announceRole = (target: string) => {
+        if (!isCurrent()) return;
         void presence.send(
-          role === "viewer" ? { role, name: normalizeDisplayName(viewerName).trim() } : { role },
+          role === "viewer" ? { role, name: normalizeDisplayName(viewerName).trim(), ...(savedGrant ? { resumeId: savedGrant.id } : {}) } : { role },
           { target },
-        );
+        ).catch(() => undefined);
       };
 
       room.onPeerJoin = (peerId) => {
+        if (!isCurrent()) return;
         connectionErrorsRef.current.delete(strategy);
         window.telaDesktop.logEvent("peer-discovered", {
           role,
@@ -554,6 +633,10 @@ function App() {
         announceRole(peerId);
       };
       room.onPeerLeave = (peerId) => {
+        if (!isCurrent()) return;
+        challenges.delete(peerId);
+        if (hostRoutes.get(room)?.peerId === peerId) hostRoutes.delete(room);
+        if (pendingStreams.get(room)?.peerId === peerId) pendingStreams.delete(room);
         if (role === "host") {
           const connection = viewerConnectionsRef.current.get(peerId);
           if (!connection) return;
@@ -575,16 +658,22 @@ function App() {
           hostSessionRef.current.room === room
         ) {
           hostSessionRef.current = null;
+          disposePlaybackRef.current?.();
+          disposePlaybackRef.current = null;
+          remoteStreamRef.current?.getTracks().forEach((track) => track.stop());
           remoteStreamRef.current = null;
           setRemoteStream(null);
           if (viewerAdmissionStateRef.current !== "denied" && viewerAdmissionStateRef.current !== "kicked") {
-            setConnectionState("A transmissão terminou");
+            setConnectionState("Reconectando à transmissão");
+            const fallback = [...hostRoutes.entries()].find(([, host]) => host.peerId === peerId);
+            if (fallback) hostSessionRef.current = { peerId, room: fallback[0] };
           }
         }
       };
 
       presence.onMessage = (data, { peerId }) => {
-        const presenceData = data as { role?: Role; name?: string };
+        if (!isCurrent()) return;
+        const presenceData = data as { role?: Role; name?: string; resumeId?: string };
         const remoteRole = presenceData?.role;
         if (role === "host" && remoteRole === "viewer" && stream) {
           const route: ViewerRoute = {
@@ -592,20 +681,21 @@ function App() {
             strategy,
             sendAdmission: admission.send as ViewerRoute["sendAdmission"],
           };
-          if (deniedViewerIdsRef.current.has(peerId)) {
-            void route.sendAdmission({ status: "denied" }, { target: peerId });
+          if (deniedViewerIdsRef.current.has(peerId) || (presenceData.resumeId && deniedGrantIdsRef.current.has(presenceData.resumeId))) {
+            void route.sendAdmission({ status: "denied" }, { target: peerId }).catch(() => undefined);
             return;
           }
 
           const current = viewerConnectionsRef.current.get(peerId);
           if (current) {
             if (!current.routes.some((candidate) => candidate.room === room)) current.routes.push(route);
-            if (presenceData.name) current.name = normalizeDisplayName(presenceData.name).trim() || current.name;
+            if (typeof presenceData.name === "string") current.name = normalizeDisplayName(presenceData.name).trim() || current.name;
             syncViewerParticipants();
+            if (current.status === "approved" && !current.activeRoom) void startViewerStream(current, route);
           } else {
             viewerConnectionsRef.current.set(peerId, {
               peerId,
-              name: normalizeDisplayName(presenceData.name ?? "").trim() || `Amigo ${peerId.slice(0, 4).toUpperCase()}`,
+              name: normalizeDisplayName(typeof presenceData.name === "string" ? presenceData.name : "").trim() || `Amigo ${peerId.slice(0, 4).toUpperCase()}`,
               status: "pending",
               strategy,
               routes: [route],
@@ -613,9 +703,18 @@ function App() {
             setConnectionState("Aguardando sua aprovação");
             syncViewerParticipants();
           }
+          if (viewerConnectionsRef.current.get(peerId)?.status !== "approved" && isSecret(presenceData.resumeId) && hostGrantsRef.current.has(presenceData.resumeId)) {
+            const existing = challenges.get(peerId);
+            if (!existing || existing.expires < Date.now()) {
+              const challenge = { nonce: randomSecret(), grantId: presenceData.resumeId, expires: Date.now() + 10_000 };
+              challenges.set(peerId, challenge);
+              void route.sendAdmission({ status: "challenge", nonce: challenge.nonce, grantId: challenge.grantId }, { target: peerId }).catch(() => undefined);
+            }
+          }
         }
 
-        if (role === "viewer" && remoteRole === "host" && !hostSessionRef.current) {
+        if (role === "viewer" && remoteRole === "host") hostRoutes.set(room, { peerId, strategy });
+        if (role === "viewer" && remoteRole === "host" && !hostSessionRef.current && !["denied", "kicked"].includes(viewerAdmissionStateRef.current)) {
           hostSessionRef.current = { peerId, room };
           if (connectionTimeoutRef.current !== null) {
             window.clearTimeout(connectionTimeoutRef.current);
@@ -626,16 +725,38 @@ function App() {
       };
 
       if (role === "viewer") {
-        admission.onMessage = (data, { peerId }) => {
+        admission.onMessage = async (data, { peerId }) => {
+          if (!isCurrent()) return;
+          // An admission can arrive before the host's presence on a fast route.
+          if (!hostSessionRef.current && hostRoutes.get(room)?.peerId === peerId) hostSessionRef.current = { peerId, room };
           if (hostSessionRef.current?.peerId !== peerId) return;
-          const status = (data as { status?: string })?.status;
+          const payload = data as { status?: string; nonce?: string; grantId?: string; grant?: RoomGrant };
+          const status = payload?.status;
+          if (status === "challenge" && savedGrant && savedGrant.hostPeerId === peerId && payload.grantId === savedGrant.id && isSecret(payload.nonce)) {
+            const proof = await createRejoinProof(savedGrant, code, peerId, selfId, payload.nonce).catch(() => null);
+            if (isCurrent() && proof) void rejoin.send({ proof }, { target: peerId }).catch(() => undefined);
+            return;
+          }
+          if (["denied", "kicked"].includes(viewerAdmissionStateRef.current)) return;
           if (status === "approved") {
             viewerAdmissionStateRef.current = "approved";
-            hostSessionRef.current = { peerId, room };
-            setConnectionState(`Aguardando vídeo · ${strategy}`);
+            if (isGrant(payload.grant)) {
+              saveRoomGrant(code, payload.grant, peerId);
+              savedGrant = { ...payload.grant, hostPeerId: peerId, savedAt: Date.now() };
+            }
+            if (!remoteStreamRef.current) {
+              hostSessionRef.current = { peerId, room };
+              setConnectionState(`Aguardando vídeo · ${strategy}`);
+            }
+            acceptStream(room);
             setError("");
           } else if (status === "denied" || status === "kicked") {
             viewerAdmissionStateRef.current = status;
+            forgetRoomGrant(code);
+            savedGrant = null;
+            pendingStreams.clear();
+            disposePlaybackRef.current?.();
+            disposePlaybackRef.current = null;
             remoteStreamRef.current?.getTracks().forEach((track) => track.stop());
             remoteStreamRef.current = null;
             setRemoteStream(null);
@@ -645,30 +766,45 @@ function App() {
               : "O anfitrião não autorizou sua entrada nesta transmissão.");
           }
         };
+      } else {
+        rejoin.onMessage = async (data, { peerId }) => {
+          if (!isCurrent()) return;
+          const challenge = challenges.get(peerId);
+          challenges.delete(peerId); // A challenge is single-use, including invalid proofs.
+          const grant = challenge && hostGrantsRef.current.get(challenge.grantId);
+          if (!challenge || !grant || challenge.expires < Date.now()) return;
+          const valid = await verifyRejoinProof(grant, code, selfId, peerId, challenge.nonce, (data as { proof?: unknown })?.proof).catch(() => false);
+          const connection = viewerConnectionsRef.current.get(peerId);
+          if (!valid || !isCurrent() || !connection || !hostGrantsRef.current.has(grant.id) || deniedViewerIdsRef.current.has(peerId)) return;
+          connection.status = "approved";
+          connection.grantId = grant.id;
+          void startViewerStream(connection);
+        };
       }
 
       if (role === "viewer") {
         room.onPeerStream = (incomingStream, peerId, metadata) => {
+          if (!isCurrent()) return;
           if (
             (metadata as { kind?: string } | undefined)?.kind !== "screen" ||
-            remoteStreamRef.current ||
-            hostSessionRef.current?.peerId !== peerId ||
-            viewerAdmissionStateRef.current !== "approved"
+            hostSessionRef.current?.peerId !== peerId
           ) return;
-          hostSessionRef.current = { peerId, room };
-          remoteStreamRef.current = incomingStream;
-          setRemoteStream(incomingStream);
-          setConnectionState(`Conectado · ${strategy}`);
-          setError("");
-          if (connectionTimeoutRef.current !== null) window.clearTimeout(connectionTimeoutRef.current);
+          pendingStreams.set(room, { stream: incomingStream, peerId, strategy });
+          acceptStream(room);
         };
       }
 
       for (const peerId of Object.keys(room.getPeers())) announceRole(peerId);
+      const heartbeat = () => {
+        for (const peerId of Object.keys(room.getPeers())) announceRole(peerId);
+        later(heartbeat, 3_000);
+      };
+      later(heartbeat, 3_000);
     }
 
     if (role === "viewer") {
       connectionTimeoutRef.current = window.setTimeout(() => {
+        if (!isCurrent()) return;
         if (remoteStreamRef.current || hostSessionRef.current) return;
         const sockets = [
           ...Object.values(getNostrRelaySockets()),
@@ -695,42 +831,32 @@ function App() {
     const connection = viewerConnectionsRef.current.get(peerId);
     const stream = localStreamRef.current;
     if (!connection || !stream || connection.status === "approved") return;
-    const route = connection.routes[0];
-    if (!route) return;
-
+    if (!connection.routes.length) return;
+    const grant = { id: randomSecret(), secret: randomSecret() };
+    hostGrantsRef.current.set(grant.id, grant);
+    connection.grantId = grant.id;
     connection.status = "approved";
-    connection.activeRoom = route.room;
-    viewerRoomsRef.current.set(peerId, route.room);
-    syncViewerParticipants();
-    setConnectionState(`Transmitindo · ${route.strategy}`);
-    await Promise.allSettled(connection.routes.map((candidate) =>
-      candidate.sendAdmission({ status: "approved" }, { target: peerId }),
-    ));
-    route.room.addStream(stream, { target: peerId, metadata: { kind: "screen", strategy: route.strategy } });
-    window.setTimeout(() => {
-      const pc = route.room.getPeers()[peerId];
-      if (pc) void configureVideoSender(pc, quality);
-    }, 500);
+    await startViewerStreamRef.current?.(connection);
     window.telaDesktop.logEvent("viewer-approved", { peer: peerId.slice(0, 8) });
-  }, [configureVideoSender, quality, syncViewerParticipants]);
+  }, []);
 
   const removeViewer = useCallback(async (peerId: string, status: "denied" | "kicked") => {
     const connection = viewerConnectionsRef.current.get(peerId);
     if (!connection) return;
 
     deniedViewerIdsRef.current.add(peerId);
-    await Promise.allSettled(connection.routes.map((route) =>
+    if (connection.grantId) {
+      hostGrantsRef.current.delete(connection.grantId);
+      deniedGrantIdsRef.current.add(connection.grantId);
+    }
+    // Revoke before awaiting network sends, so late approval work cannot send media.
+    connection.status = "pending";
+    for (const route of connection.routes) {
+      if (localStreamRef.current) route.room.removeStream(localStreamRef.current, { target: peerId });
+    }
+    void Promise.allSettled(connection.routes.map((route) =>
       route.sendAdmission({ status }, { target: peerId }),
     ));
-    for (const route of connection.routes) {
-      const pc = route.room.getPeers()[peerId];
-      if (pc) {
-        for (const sender of pc.getSenders()) {
-          if (sender.track) await sender.replaceTrack(null).catch(() => undefined);
-        }
-        window.setTimeout(() => pc.close(), 250);
-      }
-    }
     viewerRoomsRef.current.delete(peerId);
     viewerConnectionsRef.current.delete(peerId);
     syncViewerParticipants();
@@ -758,6 +884,7 @@ function App() {
       });
       await Promise.all(peerConnections.map((pc) => configureVideoSender(pc, preset)));
       setQualityKey(nextKey);
+      liveQualityRef.current = preset;
       setQualityNotice(`${preset.label} aplicada sem desconectar ninguém.`);
       window.telaDesktop.logEvent("quality-change", {
         quality: preset.key,
@@ -777,16 +904,48 @@ function App() {
   }, [configureVideoSender, qualityChanging, qualityKey]);
 
   const cleanup = useCallback(() => {
+    sessionEpochRef.current += 1;
+    joiningRef.current = false;
+    startViewerStreamRef.current = null;
+    disposePlaybackRef.current?.();
+    disposePlaybackRef.current = null;
+    sessionTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    sessionTimersRef.current.clear();
     const hadActiveSession = Boolean(localStreamRef.current || remoteStreamRef.current || roomRefs.current.length);
-    roomRefs.current.forEach((room) => {
-      const peers = Object.values(room.getPeers()) as RTCPeerConnection[];
-      room.leave();
-      peers.forEach((peer) => peer.close());
+    const rooms = roomRefs.current;
+    const sessionPeers = new Set(rooms.flatMap((room) => Object.values(room.getPeers())));
+    rooms.forEach((room) => {
+      room.onPeerJoin = null;
+      room.onPeerLeave = null;
+      room.onPeerStream = null;
     });
+    // Trystero evicts its room cache only AFTER asynchronous leave completes.
+    // Closing its raw PCs early races this cleanup and poisons the next join.
+    const previousLeave = leavingRoomsRef.current;
+    leavingRoomsRef.current = Promise.all([
+      previousLeave,
+      ...rooms.map(async (room) => {
+        try { await room.leave(); }
+        catch {
+          // A broken data channel can reject the leave notification. Drop that
+          // transport, then let the library finish clearing its own room cache.
+          Object.values(room.getPeers()).forEach((peer) => peer.close());
+          await room.leave();
+        }
+      }),
+    ]).then(() => {
+      // This app has only one active room. Once ALL room bindings are gone,
+      // release cached transports too: no stale SDP or media transceivers on
+      // the next join, and no idle WebRTC resources after leaving the screen.
+      sessionPeers.forEach((peer) => peer.close());
+    });
+    void leavingRoomsRef.current.catch(() => undefined);
     roomRefs.current = [];
     viewerRoomsRef.current.clear();
     viewerConnectionsRef.current.clear();
     deniedViewerIdsRef.current.clear();
+    hostGrantsRef.current.clear();
+    deniedGrantIdsRef.current.clear();
     hostSessionRef.current = null;
     viewerAdmissionStateRef.current = "pending";
     connectionErrorsRef.current.clear();
@@ -882,6 +1041,8 @@ function App() {
   const startHosting = useCallback(async () => {
     if (!selectedSourceId || hostStartingRef.current || localStreamRef.current) return;
     hostStartingRef.current = true;
+    const epoch = ++sessionEpochRef.current;
+    const isCurrent = () => epoch === sessionEpochRef.current;
     setHostStarting(true);
     setError("");
     setConnectionState("Abrindo a tela");
@@ -891,8 +1052,11 @@ function App() {
     hostRoomCodeRef.current = code;
     setRoomCode(code);
     try {
+      await leavingRoomsRef.current;
+      if (!isCurrent()) return;
       const turnServersPromise = window.telaDesktop.getTurnServers().catch(() => []);
       await window.telaDesktop.selectSource(selectedSourceId);
+      if (!isCurrent()) return;
       stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           width: { ideal: quality.width },
@@ -901,18 +1065,20 @@ function App() {
         },
         audio: platform === "darwin",
       });
+      if (!isCurrent()) { stream.getTracks().forEach((track) => track.stop()); return; }
       if (platform === "win32") {
-        const filteredAudioTrack = await createFilteredAudioTrack();
+        const filteredAudioTrack = await createFilteredAudioTrack(epoch);
         stream.addTrack(filteredAudioTrack);
       }
 
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
         videoTrack.contentHint = "motion";
-        videoTrack.addEventListener("ended", () => cleanup(), { once: true });
+        videoTrack.addEventListener("ended", () => { if (isCurrent()) cleanup(); }, { once: true });
       }
 
       const turnServers = await turnServersPromise;
+      if (!isCurrent()) { stream.getTracks().forEach((track) => track.stop()); return; }
       localStreamRef.current = stream;
       setLocalStream(stream);
       setRoomCode(code);
@@ -928,6 +1094,7 @@ function App() {
       joinP2PRoom("host", code, turnServers, stream, quality);
     } catch (startError) {
       stream?.getTracks().forEach((track) => track.stop());
+      if (!isCurrent()) return;
       cleanup();
       setView("host-setup");
       const permissionDenied = startError instanceof DOMException && startError.name === "NotAllowedError";
@@ -941,6 +1108,7 @@ function App() {
   }, [cleanup, createFilteredAudioTrack, joinP2PRoom, platform, quality, selectedSourceId]);
 
   const joinRoom = useCallback(async () => {
+    if (joiningRef.current || roomRefs.current.length) return;
     const code = normalizeRoomCode(joinCode);
     const name = normalizeDisplayName(viewerName).trim();
     if (name.length < 2) {
@@ -952,6 +1120,8 @@ function App() {
       return;
     }
 
+    joiningRef.current = true;
+    const epoch = ++sessionEpochRef.current;
     localStorage.setItem("tela-viewer-name", name);
     setViewerName(name);
     viewerAdmissionStateRef.current = "pending";
@@ -960,19 +1130,24 @@ function App() {
     setConnectionState("Preparando as rotas");
     setView("viewer-live");
     try {
+      await leavingRoomsRef.current;
+      if (epoch !== sessionEpochRef.current) return;
       const turnServers = await window.telaDesktop.getTurnServers().catch(() => []);
+      if (epoch !== sessionEpochRef.current) return;
       setConnectionState("Procurando a sala");
       joinP2PRoom("viewer", code, turnServers);
     } catch (joinError) {
+      if (epoch !== sessionEpochRef.current) return;
       cleanup();
       setView("viewer-join");
       setError(joinError instanceof Error ? joinError.message : "Não foi possível entrar na sala.");
+    } finally {
+      if (epoch === sessionEpochRef.current) joiningRef.current = false;
     }
   }, [cleanup, joinCode, joinP2PRoom, viewerName]);
 
   const leaveSession = useCallback(() => {
     cleanup();
-    hostStartingRef.current = false;
     hostRoomCodeRef.current = "";
     setHostStarting(false);
     setRoomCode("");
@@ -998,15 +1173,22 @@ function App() {
     if (view !== "host-live" && view !== "viewer-live") return;
     let previousBytes = 0;
     let previousTimestamp = 0;
+    let previousPc: RTCPeerConnection | undefined;
+    let disposed = false;
 
     const interval = window.setInterval(async () => {
       let pc: RTCPeerConnection | undefined;
-      for (const room of roomRefs.current) {
-        pc = Object.values(room.getPeers())[0] as RTCPeerConnection | undefined;
-        if (pc) break;
+      if (view === "viewer-live") {
+        const host = hostSessionRef.current;
+        pc = host?.room.getPeers()[host.peerId];
+      } else {
+        const [peerId, room] = viewerRoomsRef.current.entries().next().value ?? [];
+        if (room && peerId) pc = room.getPeers()[peerId];
       }
       if (!pc) return;
-      const report = await pc.getStats();
+      if (previousPc !== pc) { previousBytes = 0; previousTimestamp = 0; previousPc = pc; }
+      const report = await pc.getStats().catch(() => null);
+      if (!report || disposed || pc !== previousPc) return;
       setStats((current) => {
         const next: ConnectionStats = { ...current };
         report.forEach((stat) => {
@@ -1029,7 +1211,7 @@ function App() {
       });
     }, 1_000);
 
-    return () => window.clearInterval(interval);
+    return () => { disposed = true; window.clearInterval(interval); };
   }, [view]);
 
   return (
@@ -1341,7 +1523,7 @@ function App() {
               <div className="invite-card panel">
                 <span className="card-kicker">CONVITE</span>
                 <h2>Chame seus amigos</h2>
-                <p>Envie este código. Você ainda aprova cada pessoa antes de liberar o vídeo.</p>
+                <p>Aprove cada amigo uma vez. Ele pode sair e voltar nesta transmissão. Remover revoga esse acesso.</p>
                 <button className="room-code-copy" onClick={() => void copyInvite()}>
                   <span>{roomCode}</span>{copied ? <Check size={18} /> : <Copy size={18} />}
                 </button>
