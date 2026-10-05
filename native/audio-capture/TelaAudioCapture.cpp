@@ -2,6 +2,7 @@
 #include <TlHelp32.h>
 #include <audioclient.h>
 #include <audioclientactivationparams.h>
+#include <audiopolicy.h>
 #include <fcntl.h>
 #include <io.h>
 #include <mmdeviceapi.h>
@@ -51,6 +52,85 @@ bool IsDiscordExecutable(const wchar_t* executable)
         _wcsicmp(executable, L"DiscordDevelopment.exe") == 0;
 }
 
+DWORD SelectDiscordRoot(const std::unordered_map<DWORD, DWORD>& parents, DWORD preferredPid)
+{
+    std::unordered_set<DWORD> discordPids;
+    for (const auto& [pid, _] : parents)
+    {
+        discordPids.insert(pid);
+    }
+
+    if (discordPids.count(preferredPid))
+    {
+        DWORD root = preferredPid;
+        std::unordered_set<DWORD> visited;
+        while (visited.insert(root).second)
+        {
+            const auto process = parents.find(root);
+            if (process == parents.end() || !discordPids.count(process->second)) break;
+            root = process->second;
+        }
+        return root;
+    }
+
+    DWORD root = 0;
+    for (const auto& [pid, parentPid] : parents)
+    {
+        if (!discordPids.count(parentPid) && (root == 0 || pid < root))
+        {
+            root = pid;
+        }
+    }
+
+    return root != 0 ? root : parents.begin()->first;
+}
+
+DWORD FindActiveDiscordAudioProcess(const std::unordered_set<DWORD>& discordPids)
+{
+    ComPtr<IMMDeviceEnumerator> deviceEnumerator;
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&deviceEnumerator)))) return 0;
+
+    ComPtr<IMMDeviceCollection> devices;
+    if (FAILED(deviceEnumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &devices))) return 0;
+
+    UINT deviceCount = 0;
+    if (FAILED(devices->GetCount(&deviceCount))) return 0;
+    for (UINT deviceIndex = 0; deviceIndex < deviceCount; ++deviceIndex)
+    {
+        ComPtr<IMMDevice> device;
+        if (FAILED(devices->Item(deviceIndex, &device))) continue;
+
+        ComPtr<IAudioSessionManager2> sessionManager;
+        if (FAILED(device->Activate(__uuidof(IAudioSessionManager2), CLSCTX_INPROC_SERVER,
+            nullptr, reinterpret_cast<void**>(sessionManager.GetAddressOf())))) continue;
+
+        ComPtr<IAudioSessionEnumerator> sessions;
+        if (FAILED(sessionManager->GetSessionEnumerator(&sessions))) continue;
+
+        int sessionCount = 0;
+        if (FAILED(sessions->GetCount(&sessionCount))) continue;
+        for (int sessionIndex = 0; sessionIndex < sessionCount; ++sessionIndex)
+        {
+            ComPtr<IAudioSessionControl> session;
+            if (FAILED(sessions->GetSession(sessionIndex, &session))) continue;
+
+            AudioSessionState state = AudioSessionStateExpired;
+            if (FAILED(session->GetState(&state)) || state != AudioSessionStateActive) continue;
+
+            ComPtr<IAudioSessionControl2> sessionDetails;
+            if (FAILED(session.As(&sessionDetails))) continue;
+
+            DWORD processId = 0;
+            if (SUCCEEDED(sessionDetails->GetProcessId(&processId)) && discordPids.count(processId))
+            {
+                return processId;
+            }
+        }
+    }
+    return 0;
+}
+
 DWORD FindDiscordRootProcess()
 {
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -81,21 +161,8 @@ DWORD FindDiscordRootProcess()
     }
 
     std::unordered_set<DWORD> discordPids;
-    for (const auto& [pid, _] : parents)
-    {
-        discordPids.insert(pid);
-    }
-
-    DWORD root = 0;
-    for (const auto& [pid, parentPid] : parents)
-    {
-        if (!discordPids.count(parentPid) && (root == 0 || pid < root))
-        {
-            root = pid;
-        }
-    }
-
-    return root != 0 ? root : parents.begin()->first;
+    for (const auto& [pid, _] : parents) discordPids.insert(pid);
+    return SelectDiscordRoot(parents, FindActiveDiscordAudioProcess(discordPids));
 }
 
 class ProcessLoopbackCapture final :
@@ -268,10 +335,32 @@ void PrintFailure(const wchar_t* phase, HRESULT hr)
     fflush(stderr);
 }
 
+bool RunSelfTest()
+{
+    const std::unordered_map<DWORD, DWORD> twoDiscordTrees{
+        { 100, 1 },
+        { 101, 100 },
+        { 300, 1 },
+        { 301, 300 },
+    };
+    const DWORD selectedRoot = SelectDiscordRoot(twoDiscordTrees, 301);
+    if (selectedRoot != 300)
+    {
+        fwprintf(stderr, L"SELFTEST expected active Discord root 300, got %lu\n", static_cast<unsigned long>(selectedRoot));
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t* argv[])
 {
+    if (argc == 2 && wcscmp(argv[1], L"--self-test") == 0)
+    {
+        return RunSelfTest() ? 0 : 1;
+    }
+
     _setmode(_fileno(stdout), _O_BINARY);
     setvbuf(stdout, nullptr, _IONBF, 0);
     SetConsoleCtrlHandler(ConsoleControlHandler, TRUE);

@@ -378,6 +378,11 @@ function startDiscordFilteredAudio() {
         const readyMatch = /^READY\s+(\d+)$/.exec(line.trim());
         if (readyMatch) {
           const discordPid = Number(readyMatch[1]);
+          logEvent("audio-helper-ready", {
+            pid: child.pid,
+            discordPid,
+            discordExcluded: discordPid > 0,
+          });
           if (!ready) {
             ready = true;
             clearTimeout(startupTimeout);
