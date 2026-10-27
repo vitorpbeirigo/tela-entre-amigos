@@ -9,7 +9,7 @@ import { QUALITY_PRESETS, type CaptureScreen, type QualityKey } from "./screen-m
 import "./friends.css";
 
 let pendingRoomLeave: Promise<void> = Promise.resolve();
-const EMPTY: FriendsSnapshot = { members: [], watching: [], viewers: 0, streamId: null, quality: "performance", error: "" };
+const EMPTY: FriendsSnapshot = { members: [], watching: [], viewers: 0, streamId: null, quality: "performance", error: "", connectionNotice: "" };
 const message = (error: unknown) => error instanceof Error ? error.message : "Não foi possível concluir. Tente novamente.";
 
 function ScreenTile({ member, focused, muted, volume, onFocus, onVolume, onClose }: {
@@ -129,13 +129,25 @@ export default function FriendsHub({ platform, capture, stopAudio, onBack, captu
       if (!mounted.current) return;
       const config = { appId: "com.gregpreto.infinity.friends.v1", password: room.secret, turnConfig: [] };
       const routes: Room[] = [];
-      const failure = () => {
-        if (mounted.current && operation.current === epoch) setError("Uma rota não conectou. O Infinity tenta as outras; confira as permissões de rede se seus amigos não aparecerem.");
+      let controller: FriendsSession | undefined;
+      const strategies = new Map<Room, { name: string; join: typeof joinNostrRoom }>();
+      const createRoute = (strategy: string, join: typeof joinNostrRoom): Room => {
+        const route = join(config, room.id, { onJoinError: (details) => {
+          if (mounted.current && operation.current === epoch) controller?.reportRouteFailure(route, details.error, details.peerId, strategy);
+        } });
+        strategies.set(route, { name: strategy, join });
+        return route;
       };
       try {
-        for (const join of [joinNostrRoom, joinMqttRoom, joinTorrentRoom]) routes.push(join(config, room.id, { onJoinError: failure }));
-        const controller = new FriendsSession(identity, displayName, routes, (snapshot) => {
+        for (const [strategy, join] of [["Nostr", joinNostrRoom], ["MQTT", joinMqttRoom], ["Torrent", joinTorrentRoom]] as const) routes.push(createRoute(strategy, join));
+        controller = new FriendsSession(identity, displayName, routes, (snapshot) => {
           if (mounted.current && session.current === controller) setState(snapshot);
+        }, (previous) => {
+          const strategy = strategies.get(previous);
+          if (!strategy) throw new Error("Rota de conexão indisponível.");
+          const replacement = createRoute(strategy.name, strategy.join);
+          strategies.delete(previous);
+          return replacement;
         });
         session.current = controller;
         setState(controller.snapshot()); setActive(room); setQuality("performance"); setLayout("mosaic");
@@ -238,6 +250,7 @@ export default function FriendsHub({ platform, capture, stopAudio, onBack, captu
 
       <div className="friends-content">
         {visibleError && <div className="friends-error" role="alert"><span>{visibleError}</span><button className="icon-button" aria-label="Abrir permissões" title="Abrir permissões de rede" onClick={() => void window.telaDesktop.openConnectionSettings()}><ShieldCheck size={17} /></button></div>}
+        {active && state.connectionNotice && <div className="friends-error friends-connection-notice" role="status"><span>{state.connectionNotice}</span><button className="button button-secondary" onClick={() => void session.current?.retryConnections(true)}><RefreshCw size={15} /> Tentar reconectar</button></div>}
         {!active ? <div className="friends-welcome">
           <span className="eyebrow"><Users size={14} /> Entre uma vez. Volte sempre.</span>
           <h1>A turma junta.<br /><em>Cada um na sua tela.</em></h1>

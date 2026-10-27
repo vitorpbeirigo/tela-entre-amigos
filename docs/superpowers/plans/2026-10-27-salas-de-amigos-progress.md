@@ -53,3 +53,15 @@ O usuário autorizou publicar para todos, incluindo Windows, Mac e downloads do 
 Release: https://github.com/vitorpbeirigo/tela-entre-amigos/releases/tag/v0.10.0
 
 Limite da publicação: build/assinatura Mac comprovados pelo CI, sem teste interativo em hardware Mac. Os testes de conexão foram realizados nesta máquina; conectividade entre operadoras/rede restritiva permanece dependente de P2P.
+
+## Recuperação de participantes — 27/10/2026
+
+Após a publicação, um amigo apareceu sozinho enquanto dois participantes se encontravam. Depois o usuário confirmou os três conectados e transmitindo: não havia limite de duas pessoas. Sem o erro original detalhado, não foi possível atribuir a ocorrência a firewall, NAT ou estratégia específica.
+
+O código mantinha um alerta genérico mesmo quando outra estratégia conectava o mesmo participante. Pedidos de vídeo também podiam ficar esperando uma rota sem receber a primeira mídia. A versão 0.10.1 limpa o alerta ao recuperar, tenta renegociar transportes interrompidos e troca o pedido de vídeo após 15 segundos sem mídia. Rotas de descoberta vazias que falharam são reabertas com intervalo crescente; rotas que já têm participantes permanecem intactas. Diagnósticos locais registram categorias, sem convite/senha/IP/SDP. Nenhum TURN ou servidor de vídeo foi adicionado.
+
+A revisão independente identificou uma corrida durante o `leave()` assíncrono do Trystero: presença tardia na rota em encerramento e restauração de aviso já resolvido. O patch ignora a presença dessa rota e transfere somente a falha ainda pendente; teste de regressão passou. Revisão final sem bloqueios.
+
+Validação da revisão final: **47/47 testes passaram (1.2m, workers=2)**, incluindo três e quatro clientes WebRTC, terceiro cliente inicialmente sem rede que aparece após a rede voltar, três transmissões simultâneas em mosaico, continuidade das telas existentes e capturas reais no Electron. Typecheck passou no build. As seis regressões de recuperação foram adicionadas à suíte de sessão (14 testes no total).
+
+Limite: testes multicliente locais não comprovam conectividade entre quaisquer operadoras. P2P puro continua sujeito às restrições de rede; a correção recupera falhas transitórias, sem prometer conexão universal. Publicação 0.10.1 ainda pendente neste registro.

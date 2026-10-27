@@ -184,3 +184,106 @@ test("presença recebida não injeta estado interno de reprodução", async () =
   expect(session.snapshot().members[0].stream).toBeNull();
   await session.close();
 });
+
+test("aviso de rota desaparece quando o participante conecta por outra estratégia", async () => {
+  const a = harness(), b = harness(); const session = new FriendsSession(localId, "Eu", [a.room, b.room], () => undefined);
+  try {
+    session.reportRouteFailure(a.room, "could not connect after exchanging SDP", "peer", "Nostr");
+    expect(session.snapshot().connectionNotice).toContain("Reconectando");
+    b.presence();
+    expect(session.snapshot().connectionNotice).toBe("");
+    session.reportRouteFailure(a.room, "could not connect after exchanging SDP", "peer", "Nostr");
+    expect(session.snapshot().connectionNotice).toBe("");
+  } finally { await session.close(); }
+});
+
+test("pedido sem primeiro vídeo muda de rota e rejeita resposta atrasada da anterior", async () => {
+  const a = harness(), b = harness(); const session = new FriendsSession(localId, "Eu", [a.room, b.room], () => undefined);
+  const originalNow = Date.now;
+  try {
+    const streamId = randomSecret(); a.presence(streamId); b.presence(streamId);
+    session.watch(friendId);
+    const original = a.sends.filter((item) => item.action === "fr-watch").at(-1)!.data;
+    const now = originalNow(); Date.now = () => now + 16_000;
+    await session.retryConnections();
+    const fallback = b.sends.filter((item) => item.action === "fr-watch").at(-1)!.data;
+    expect(fallback.watching).toBe(true); expect(fallback.watchId).not.toBe(original.watchId);
+    expect(a.sends.filter((item) => item.action === "fr-watch").at(-1)!.data.watching).toBe(false);
+    a.room.onPeerStream?.(media(), "peer", { streamId, watchId: original.watchId });
+    expect(session.snapshot().members[0].stream).toBeNull();
+    b.room.onPeerStream?.(media(), "peer", { streamId, watchId: fallback.watchId });
+    expect(session.snapshot().members[0].stream?.getVideoTracks()).toHaveLength(1);
+    const requestCount = b.sends.length;
+    Date.now = () => now + 40_000; await session.retryConnections();
+    expect(b.sends.length).toBe(requestCount);
+  } finally { Date.now = originalNow; await session.close(); }
+});
+
+test("redescoberta reinicia apenas a rota vazia e preserva vídeo de quem já conectou", async () => {
+  const a = harness(), b = harness(), replacement = harness(); let restarts = 0, healthyLeaves = 0;
+  const oldLeave = a.room.leave; a.room.leave = async () => { healthyLeaves++; await oldLeave(); };
+  const session = new FriendsSession(localId, "Eu", [a.room, b.room], () => undefined, (room) => {
+    expect(room).toBe(b.room); restarts++; return replacement.room;
+  });
+  try {
+    const streamId = randomSecret(); a.presence(streamId); session.watch(friendId);
+    const request = a.sends.filter((item) => item.action === "fr-watch").at(-1)!.data;
+    a.room.onPeerStream?.(media(), "peer", { streamId, watchId: request.watchId });
+    const playback = session.snapshot().members[0].stream;
+    session.reportRouteFailure(b.room, "could not connect", "missing-peer", "MQTT");
+    session.reportRouteFailure(a.room, "could not connect", "other-peer", "Nostr");
+    await session.retryConnections(true);
+    expect(restarts).toBe(1); expect(healthyLeaves).toBe(0);
+    expect(session.snapshot().members[0].stream).toBe(playback);
+    expect(playback?.getTracks()[0].readyState).toBe("live");
+    replacement.presence(null, "c".repeat(64), "missing-peer");
+    expect(session.snapshot().members).toHaveLength(2);
+  } finally { await session.close(); }
+});
+
+test("recuperação pendente não reabre sala depois que o usuário sai", async () => {
+  const a = harness(); let release!: () => void, attempts = 0, restarts = 0;
+  a.room.leave = async () => { if (attempts++ === 0) await new Promise<void>((resolve) => { release = resolve; }); };
+  const session = new FriendsSession(localId, "Eu", [a.room], () => undefined, () => { restarts++; return harness().room; });
+  session.reportRouteFailure(a.room, "could not connect", "peer", "Nostr");
+  const recovering = session.retryConnections(true);
+  await session.close(); release(); await recovering;
+  expect(restarts).toBe(0);
+});
+
+test("reinicia ICE só no transporte interrompido e trata convite errado separadamente", async () => {
+  const a = harness(); let badRestarts = 0, healthyRestarts = 0, discoveryRestarts = 0;
+  const connections = {
+    bad: { connectionState: "disconnected", restartIce: () => badRestarts++, close: () => undefined } as RTCPeerConnection,
+    healthy: { connectionState: "connected", restartIce: () => healthyRestarts++, close: () => undefined } as RTCPeerConnection,
+  };
+  a.room.getPeers = () => connections;
+  const session = new FriendsSession(localId, "Eu", [a.room], () => undefined, () => { discoveryRestarts++; return harness().room; });
+  try {
+    await session.retryConnections(true); await session.retryConnections(true);
+    expect(badRestarts).toBe(1); expect(healthyRestarts).toBe(0);
+    session.reportRouteFailure(a.room, "incorrect room password when decrypting offer", "unknown", "Nostr");
+    expect(session.snapshot().connectionNotice).toContain("convite");
+    await session.retryConnections(true); expect(discoveryRestarts).toBe(0);
+  } finally { await session.close(); }
+});
+
+test("presença durante leave não publica rota encerrando nem restaura aviso já resolvido", async () => {
+  const a = harness(), b = harness(), replacement = harness();
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  a.room.leave = () => pending;
+  const session = new FriendsSession(localId, "Eu", [a.room, b.room], () => undefined, () => replacement.room);
+  try {
+    session.reportRouteFailure(a.room, "could not connect after exchanging SDP", "peer", "Nostr");
+    const retry = session.retryConnections(true);
+    a.presence();
+    expect(session.snapshot().members).toHaveLength(0);
+    b.presence();
+    expect(session.snapshot().members).toHaveLength(1);
+    expect(session.snapshot().connectionNotice).toBe("");
+    release(); await retry;
+    expect(session.snapshot().connectionNotice).toBe("");
+    expect(session.snapshot().members[0].connected).toBe(true);
+  } finally { release(); await session.close(); }
+});

@@ -78,3 +78,43 @@ test("três clientes: duas telas simultâneas, mosaico, retorno e sala sem criad
     expect(errors).toEqual([]);
   } finally { await Promise.allSettled(contexts.map((context) => context.close())); }
 });
+
+test("quatro clientes: entrada após queda de rede sem reiniciar quem já transmite", async ({ browser }) => {
+  test.setTimeout(210_000);
+  const contexts = await Promise.all([0, 1, 2, 3].map(() => browser.newContext()));
+  const pages = await Promise.all(contexts.map((context) => context.newPage()));
+  const [greg, ana, bia, gui] = pages;
+  try {
+    for (const page of pages) { await mockFriendsDesktop(page); await page.goto("/"); }
+    const invite = await createFriendsRoom(greg, "Greg", `Reconexão ${Date.now()}`);
+    await importFriendsRoom(ana, invite, "Ana");
+    await shareInFriendsRoom(greg);
+    await expect(ana.getByRole("button", { name: "Assistir Greg", exact: true })).toBeVisible({ timeout: 40_000 });
+    await ana.getByRole("button", { name: "Assistir Greg", exact: true }).click();
+    await expectVideo(ana, "Greg");
+    await contexts[2].setOffline(true);
+    await importFriendsRoom(bia, invite, "Bia");
+    await expect(bia.getByRole("region", { name: "Pessoas na sala" })).not.toContainText("Greg");
+    const video = ana.getByRole("article", { name: "Tela de Greg", exact: true }).locator("video");
+    const frames = await video.evaluate((element: HTMLVideoElement) => element.getVideoPlaybackQuality().totalVideoFrames);
+    await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.getVideoPlaybackQuality().totalVideoFrames)).toBeGreaterThan(frames + 15);
+    await contexts[2].setOffline(false);
+    await expect(bia.getByRole("button", { name: "Assistir Greg", exact: true })).toBeVisible({ timeout: 65_000 });
+    await bia.getByRole("button", { name: "Assistir Greg", exact: true }).click();
+    await expectVideo(bia, "Greg");
+    await importFriendsRoom(gui, invite, "Gui");
+    for (const page of pages) {
+      for (const name of ["Greg", "Ana", "Bia", "Gui"]) await expect(page.getByRole("region", { name: "Pessoas na sala" })).toContainText(name, { timeout: 40_000 });
+      await expect(page.locator(".friends-connection-notice")).toHaveCount(0, { timeout: 15_000 });
+    }
+    await shareInFriendsRoom(ana);
+    await shareInFriendsRoom(bia);
+    for (const name of ["Greg", "Ana", "Bia"]) {
+      await expect(gui.getByRole("button", { name: `Assistir ${name}`, exact: true })).toBeVisible({ timeout: 30_000 });
+      await gui.getByRole("button", { name: `Assistir ${name}`, exact: true }).click();
+      await expectVideo(gui, name);
+    }
+    await expect(gui.locator(".friend-screen")).toHaveCount(3);
+    await expectVideo(ana, "Greg");
+  } finally { await Promise.allSettled(contexts.map((context) => context.close())); }
+});

@@ -39,6 +39,7 @@
 .friends-welcome > small { color: #879498; font-size: 11px; line-height: 1.7; }
 .friends-error { padding: 12px 15px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #a35b5644; border-radius: 12px; background: #301619; color: #ffb3b8; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .friends-error span { min-width: 0; }
+.friends-connection-notice { background: #10262b; color: #bcebf2; border-color: #225059; flex-wrap: wrap; }
 .friends-room-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-bottom: 23px; }
 .friends-room-heading .eyebrow { font-size: 9px; letter-spacing: .12em; }
 .friends-room-heading h1 { margin: 10px 0 9px; font: 38px/1.05 "Instrument Serif", serif; letter-spacing: -.02em; overflow-wrap: anywhere; }
