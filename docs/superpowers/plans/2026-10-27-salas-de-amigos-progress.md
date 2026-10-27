@@ -35,4 +35,21 @@ Suíte anterior à revisão: 34/34 passed (1.3m). A execução final abaixo incl
 
 Limites: não testado em hardware macOS nem entre redes/operadoras diferentes. Os testes reais ocorreram nesta máquina em processos/perfis separados. Não houve chamada real do Discord durante esta validação; filtro nativo existente foi preservado. Quem possui o convite pode entrar; não há banimento remoto. Compartilhar silencia reprodução das outras telas para evitar recaptura.
 
-Pacote local identificado como 0.10.0-beta.1 para diferenciá-lo da versão pública. Nenhuma tag, push ou publicação foi feita nesta tarefa.
+Ao encerrar a etapa de implementação/teste, o pacote local estava identificado como 0.10.0-beta.1; não havia publicação naquela etapa.
+
+## Publicação autorizada — 27/10/2026
+
+O usuário autorizou publicar para todos, incluindo Windows, Mac e downloads do site.
+
+- Versão estável: **v0.10.0**, tag no commit `669a913e7a671482b12bafd4b9010cce2512391b`. A branch de implementação foi integrada em main por fast-forward.
+- QA antes da tag: typecheck exit 0 e **40/40 testes passed (1.3m, workers=2)**. Uma execução anterior foi interrompida com janela Electron fechada; a execução completa posterior passou.
+- GitHub Actions **40597419390** concluiu com sucesso: Windows x64, macOS Intel/Apple Silicon e publicação da release. As assinaturas ad hoc de ambos os aplicativos Mac foram verificadas no job macOS.
+- Release pública, estável, marcada como mais recente, com 12 assets em estado uploaded. Título/notas publicados a partir de `docs/releases/v0.10.0.md`.
+- Endpoint público `https://zeroinfinity.vercel.app/api/releases`: HTTP 200, tag v0.10.0 e os três instaladores corretos.
+- As rotas `/baixar/windows`, `/baixar/mac-arm64` e `/baixar/mac-x64` retornaram HTTP 302 para seus respectivos assets v0.10.0. O serviço existente atualizou os downloads automaticamente, sem precisar de outra implantação do site.
+- `latest.yml` e `latest-mac.yml` públicos retornaram HTTP 200 e version 0.10.0. O manifesto Windows aponta para `Infinity-Setup-0.10.0.exe`; o do Mac inclui x64 e arm64.
+- Windows segue com atualização automática ao abrir; macOS segue com download/substituição manual.
+
+Release: https://github.com/vitorpbeirigo/tela-entre-amigos/releases/tag/v0.10.0
+
+Limite da publicação: build/assinatura Mac comprovados pelo CI, sem teste interativo em hardware Mac. Os testes de conexão foram realizados nesta máquina; conectividade entre operadoras/rede restritiva permanece dependente de P2P.
