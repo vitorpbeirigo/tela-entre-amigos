@@ -64,4 +64,10 @@ A revisão independente identificou uma corrida durante o `leave()` assíncrono 
 
 Validação da revisão final: **47/47 testes passaram (1.2m, workers=2)**, incluindo três e quatro clientes WebRTC, terceiro cliente inicialmente sem rede que aparece após a rede voltar, três transmissões simultâneas em mosaico, continuidade das telas existentes e capturas reais no Electron. Typecheck passou no build. As seis regressões de recuperação foram adicionadas à suíte de sessão (14 testes no total).
 
-Limite: testes multicliente locais não comprovam conectividade entre quaisquer operadoras. P2P puro continua sujeito às restrições de rede; a correção recupera falhas transitórias, sem prometer conexão universal. Publicação 0.10.1 ainda pendente neste registro.
+Limite: testes multicliente locais não comprovam conectividade entre quaisquer operadoras. P2P puro continua sujeito às restrições de rede; a correção recupera falhas transitórias, sem prometer conexão universal.
+
+Publicação concluída: **v0.10.1**, commit `7fd46bc3e4d24684b3c7d85e05f535145def03b8`, integrada em main por fast-forward. Build Windows completo passou e o executável empacotado passou o teste adicional de três processos / duas capturas reais (1/1). GitHub Actions **40601623510** concluiu Windows x64, Mac Intel/Apple Silicon, verificação de assinaturas ad hoc e publicação. Release estável mais recente, 12 assets uploaded, notas em `docs/releases/v0.10.1.md`.
+
+Verificação pública: GitHub latest HTTP 200 v0.10.1; `/api/releases` do site HTTP 200 v0.10.1 após revalidação do cache; os três `/baixar/*` retornam 302 para os instaladores v0.10.1. `latest.yml` e `latest-mac.yml` HTTP 200, version 0.10.1. Nenhum novo deploy do site necessário. Windows recebe atualização ao abrir; Mac continua manual. Sem teste interativo em hardware Mac.
+
+Release: https://github.com/vitorpbeirigo/tela-entre-amigos/releases/tag/v0.10.1
