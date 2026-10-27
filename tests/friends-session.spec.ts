@@ -48,10 +48,11 @@ test("envia somente para quem pede e usa uma rota por espectador", async () => {
     expect(a.added).toHaveLength(0);
     const streamId = session.snapshot().streamId;
     a.message("fr-watch", { streamId, watchId, watching: true });
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     a.message("fr-watch", { streamId, watchId, watching: true });
     expect(a.added).toHaveLength(1);
     b.message("fr-watch", { streamId, watchId, watching: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(a.removed).toEqual(a.added);
     expect(b.added).toHaveLength(1);
     expect(b.added[0].getTracks()).toEqual(stream.getTracks());
@@ -59,6 +60,7 @@ test("envia somente para quem pede e usa uma rota por espectador", async () => {
     a.message("fr-watch", { streamId, watchId, watching: false });
     expect(session.snapshot().viewers).toBe(1);
     session.setStream(null);
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(b.removed).toEqual(b.added);
     expect(session.snapshot().members).toHaveLength(1);
   } finally { await session.close(); }
@@ -124,4 +126,61 @@ test("qualidade ao vivo mantém a identidade da transmissão", async () => {
     expect(session.snapshot().streamId).toBe(id);
     expect(session.snapshot().quality).toBe("cinema");
   } finally { await session.close(); }
+});
+
+test("cancelar assinatura durante addStream pendente não deixa mídia sendo enviada", async () => {
+  const a = harness(); const session = new FriendsSession(localId, "Eu", [a.room], () => undefined);
+  let release!: () => void;
+  const attached: MediaStream[] = [];
+  a.room.addStream = (stream) => [new Promise<void>((resolve) => { release = () => { attached.push(stream); resolve(); }; })];
+  a.room.removeStream = (stream) => {
+    for (let index = attached.length - 1; index >= 0; index--) if (attached[index].getTracks().some((track) => stream.getTracks().includes(track))) attached.splice(index, 1);
+  };
+  try {
+    a.presence(); session.setStream(media());
+    const request = { streamId: session.snapshot().streamId, watchId: randomSecret(), watching: true };
+    a.message("fr-watch", request);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    a.message("fr-watch", { ...request, watching: false });
+    release(); await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(session.snapshot().viewers).toBe(0);
+    expect(attached).toEqual([]);
+  } finally { await session.close(); }
+});
+
+test("troca de assinatura pendente mantém apenas o envio novo mesmo com as mesmas tracks", async () => {
+  const a = harness(); const session = new FriendsSession(localId, "Eu", [a.room], () => undefined);
+  const pending: (() => void)[] = [];
+  const attached: MediaStream[] = [];
+  a.room.addStream = (stream) => [new Promise<void>((resolve) => { pending.push(() => { attached.push(stream); resolve(); }); })];
+  a.room.removeStream = (stream) => {
+    for (let index = attached.length - 1; index >= 0; index--) if (attached[index].getTracks().some((track) => stream.getTracks().includes(track))) attached.splice(index, 1);
+  };
+  try {
+    a.presence(); session.setStream(media());
+    const request = { streamId: session.snapshot().streamId, watchId: randomSecret(), watching: true };
+    a.message("fr-watch", request); await new Promise((resolve) => setTimeout(resolve, 0));
+    a.message("fr-watch", { ...request, watchId: randomSecret() });
+    pending.shift()!(); await new Promise((resolve) => setTimeout(resolve, 0));
+    pending.shift()!(); await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(attached).toHaveLength(1);
+    expect(session.snapshot().viewers).toBe(1);
+  } finally { pending.forEach((release) => release()); await session.close(); }
+});
+
+test("saída com canal quebrado fecha o transporte e repete leave para limpar o cache", async () => {
+  const a = harness(); let closed = false, attempts = 0, cached = true;
+  a.room.getPeers = () => closed ? {} : { peer: { close: () => { closed = true; } } as RTCPeerConnection };
+  a.room.leave = async () => { attempts++; if (!closed) throw new Error("channel closed"); cached = false; };
+  const session = new FriendsSession(localId, "Eu", [a.room], () => undefined);
+  await session.close();
+  expect(closed).toBe(true); expect(attempts).toBe(2); expect(cached).toBe(false);
+});
+
+test("presença recebida não injeta estado interno de reprodução", async () => {
+  const a = harness(); const session = new FriendsSession(localId, "Eu", [a.room], () => undefined);
+  a.message("fr-pres", { id: friendId, name: "Amigo", streamId: null, quality: "performance", revision: 0,
+    playback: { stream: { forged: true }, dispose: "not-a-function" }, receiving: { room: "forged" } });
+  expect(session.snapshot().members[0].stream).toBeNull();
+  await session.close();
 });

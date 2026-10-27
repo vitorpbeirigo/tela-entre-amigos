@@ -28,29 +28,29 @@
 
 Files: `src/saved-rooms.ts`, `tests/saved-rooms.spec.ts`.
 Interfaces: `SavedRoom`, `createSavedRoom(name)`, `parseRoomInvite(text)`, `roomInvite(room)`, `loadSavedRooms()`, `saveRoom(room)`, `forgetRoom(id)`, `loadLocalIdentity()`.
-- [ ] Testar round-trip, validação, persistência, identidade estável e storage indisponível; observar falha antes de implementar.
-- [ ] Implementar formatos versionados e armazenamento limitado/validado; executar testes.
+- [x] Testar round-trip, validação, persistência, identidade estável e storage indisponível; observar falha antes de implementar.
+- [x] Implementar formatos versionados e armazenamento limitado/validado; executar testes.
 
 ### Task 2: Captura compartilhada e controlador P2P
 
 Files: `src/screen-media.ts`, `src/friends-session.ts`, `src/App.tsx`, `tests/friends-session.spec.ts`.
 Interfaces: `QUALITY_PRESETS`, `captureDesktopStream(options)`, `configureVideoSender(pc,preset)`; `FriendsSession` controla `watch`, `unwatch`, `setStream`, `setQuality`, `close` e snapshots de participantes/mídia.
-- [ ] Testar envio sob demanda, deduplicação, stop/restart, failover e eventos após fechamento com transporte controlado.
-- [ ] Extrair captura/configuração existentes sem mudar o fluxo antigo. Implementar presença e inscrições, reusando clonagem de playback.
-- [ ] Rodar testes de protocolo e typecheck.
+- [x] Testar envio sob demanda, deduplicação, stop/restart, failover e eventos após fechamento com transporte controlado.
+- [x] Extrair captura/configuração existentes sem mudar o fluxo antigo. Implementar presença e inscrições, reusando clonagem de playback.
+- [x] Rodar testes de protocolo e typecheck.
 
 ### Task 3: Interface de salas e mosaico
 
 Files: `src/FriendsHub.tsx`, `src/friends.css`, `src/App.tsx`, `tests/friends-ui.spec.ts`.
 Interfaces: componente recebe plataforma, callback de captura existente, callback de parada de áudio e retorno à home.
-- [ ] Testar criação, importação, reload, sala salva, seleção de fonte e modo antigo.
-- [ ] Construir lista de salas, participantes, convites, seletor de captura e palco com foco/mosaico/volume. Tratar permissões, captura pendente e cleanup.
-- [ ] Verificar tamanho mínimo, teclado e estados vazios/erro.
+- [x] Testar criação, importação, reload, sala salva, seleção de fonte e modo antigo.
+- [x] Construir lista de salas, participantes, convites, seletor de captura e palco com foco/mosaico/volume. Tratar permissões, captura pendente e cleanup.
+- [x] Verificar tamanho mínimo, teclado e estados vazios/erro.
 
 ### Task 4: Integração, revisão e entrega
 
 Files: `tests/friends-live.spec.ts`, `README.md`, documento de progresso.
-- [ ] Testar três clientes reais com dois streams, mosaico, stop/restart, reentrada e ausência do criador.
-- [ ] Executar suíte completa, typecheck e build Windows. Inspecionar pacote e layout.
-- [ ] Revisão independente do diff; corrigir problemas relevantes com teste de regressão.
-- [ ] Registrar estado verificado e limites na documentação. Entregar instalador local sem publicar.
+- [x] Testar três clientes reais com dois streams, mosaico, stop/restart, reentrada e ausência do criador.
+- [x] Executar suíte completa, typecheck e build Windows. Inspecionar pacote e layout.
+- [x] Revisão independente do diff; corrigir problemas relevantes com teste de regressão.
+- [x] Registrar estado verificado e limites na documentação. Entregar instalador local sem publicar.

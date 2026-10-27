@@ -13,6 +13,26 @@ Decisão: silenciar reprodução de telas enquanto captura para impedir que o á
 Task 1: complete — 3 testes de convite/persistência passaram; identidade e segredo preservados após carregar novamente.
 Task 2: complete — 4 testes do controlador e typecheck passaram; extraiu captura/qualidade existentes e manteve filtro nativo.
 Task 3: complete — 3 testes de interface passaram, incluindo armazenamento, tamanho mínimo e captura Mac sem retorno por padrão.
-Task 4: em andamento — integração de três clientes WebRTC passou (dois transmissores, mosaico, áudio único, alteração de qualidade, rewatch, reload/reentrada e continuidade sem criador).
+Task 4: complete — integração de três clientes WebRTC passou (dois transmissores, mosaico, áudio único, alteração de qualidade, rewatch, reload/reentrada e continuidade sem criador).
 
 Regressão encontrada e corrigida: Trystero devolvia stream vazio ao voltar a assistir. Cada assinatura agora tem watchId e MediaStream próprios usando as mesmas faixas locais, sem nova captura. Teste de integração falhou antes e passou depois.
+
+Revisão independente: dois achados importantes, nenhum crítico/minor. Corrigidos com três testes que falharam antes e passaram depois: (1) serializar attach/remove por destinatário e desfazer adições tardias; (2) repetir leave após fechar PCs se o primeiro envio de saída falhar. O fechamento normal também libera os PCs compartilhados após a saída.
+
+Verificações adicionais: presença remota agora copia só campos validados (não aceita estado interno injetado); storage bloqueado não derruba o App. Ambos tiveram regressão vermelha antes da correção. 12 testes do controlador/UI passaram após os ajustes.
+
+Suíte anterior à revisão: 34/34 passed (1.3m). A execução final abaixo inclui as correções e o teste nativo com três apps, duas capturas reais e liberação dos helpers.
+
+## Verificação final — 27/10/2026
+
+- Suíte completa após ajustes: **40/40 passed (1.3m)**, incluindo teste nativo novo serializado no arquivo de testes Electron.
+- Instalador Windows: **build:win exit 0**; typecheck, bundle e helper compilados. Apenas aviso de tamanho do bundle já existente; dependências não alteradas.
+- Teste separado contra `AppData/Local/InfinityBuild/win-unpacked/Infinity.exe`: **1/1 passed (14.6s)**, três perfis, duas capturas de desktop reais, espectador com ambas as faixas de áudio e vídeo decodificado; reload da sala salva e helpers encerrados ao sair.
+- Helper incluído no pacote corresponde por SHA-256 ao helper compilado. `TelaAudioCapture.exe --self-test`: exit 0.
+- Screenshot do mosaico inspecionado em `artifacts/qa/friends-mosaic.png`. Layout mínimo 960×680 verificado por teste.
+- Pacote local: `artifacts/Infinity-Setup-0.10.0-beta.1.exe` (117029004 bytes na compilação verificada).
+- Revisão independente: ambos os achados importantes corrigidos com regressões vermelhas antes da mudança; sem minors adiados.
+
+Limites: não testado em hardware macOS nem entre redes/operadoras diferentes. Os testes reais ocorreram nesta máquina em processos/perfis separados. Não houve chamada real do Discord durante esta validação; filtro nativo existente foi preservado. Quem possui o convite pode entrar; não há banimento remoto. Compartilhar silencia reprodução das outras telas para evitar recaptura.
+
+Pacote local identificado como 0.10.0-beta.1 para diferenciá-lo da versão pública. Nenhuma tag, push ou publicação foi feita nesta tarefa.

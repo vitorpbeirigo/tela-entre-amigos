@@ -22,6 +22,7 @@ export class FriendsSession {
   private peers = new Map<string, Peer>();
   private watching = new Set<string>();
   private subscribers = new Map<string, { room: Room; peerId: string; stream: MediaStream; watchId: string }>();
+  private mediaQueue = new Map<string, Promise<void>>();
   private actions = new Map<Room, { presence: MessageAction; watch: MessageAction }>();
   private stream: MediaStream | null = null;
   private streamId: string | null = null;
@@ -67,6 +68,16 @@ export class FriendsSession {
   }
 
   private emit() { if (!this.closed) this.onChange(this.snapshot()); }
+  private queueMedia(peerId: string, operation: () => Promise<void> | void) {
+    const next = (this.mediaQueue.get(peerId) ?? Promise.resolve()).then(operation).catch(() => {
+      if (!this.closed) {
+        this.error = "Uma tela não conectou. Tente assistir novamente e confira as permissões de rede se continuar.";
+        this.emit();
+      }
+    });
+    this.mediaQueue.set(peerId, next);
+    void next.then(() => { if (this.mediaQueue.get(peerId) === next) this.mediaQueue.delete(peerId); });
+  }
   private findPeer(room: Room, peerId: string) {
     return [...this.peers.values()].find((peer) => peer.routes.get(room) === peerId);
   }
@@ -83,7 +94,8 @@ export class FriendsSession {
       !QUALITY_PRESETS.some((preset) => preset.key === data.quality) || !Number.isSafeInteger(data.revision) || data.revision < 0) return;
     let peer = this.peers.get(data.id);
     if (!peer) {
-      peer = { ...data, peerId, routes: new Map() };
+      peer = { id: data.id, name: data.name, streamId: data.streamId, quality: data.quality,
+        revision: data.revision, peerId, routes: new Map() };
       this.peers.set(data.id, peer);
     }
     if (peer.peerId !== peerId) {
@@ -142,32 +154,44 @@ export class FriendsSession {
     if (!peer || data.streamId !== this.streamId || typeof data.watching !== "boolean" || !isSecret(data.watchId)) return;
     const previous = this.subscribers.get(peer.id);
     if (!data.watching) {
-      if (previous?.room === room && previous.watchId === data.watchId) { room.removeStream(previous.stream, { target: peerId }); this.subscribers.delete(peer.id); this.emit(); }
+      if (previous?.room === room && previous.watchId === data.watchId) {
+        this.subscribers.delete(peer.id);
+        this.queueMedia(peerId, () => room.removeStream(previous.stream, { target: peerId }));
+        this.emit();
+      }
       return;
     }
     if (previous?.room === room && previous.peerId === peerId && previous.watchId === data.watchId) return;
-    if (previous) previous.room.removeStream(previous.stream, { target: previous.peerId });
     // A fresh stream identity avoids Trystero returning an empty cached stream on rewatch.
     const delivery = new MediaStream(this.stream.getTracks());
     const subscription = { room, peerId, stream: delivery, watchId: data.watchId };
     this.subscribers.set(peer.id, subscription);
     const stream = this.stream;
-    void Promise.all(room.addStream(delivery, { target: peerId, metadata: { streamId: this.streamId, watchId: data.watchId } })).then(async () => {
+    const streamId = this.streamId;
+    // Routes can share one PC; serialize track operations before attaching a replacement.
+    this.queueMedia(peerId, async () => {
+      if (previous) previous.room.removeStream(previous.stream, { target: previous.peerId });
       if (this.closed || this.stream !== stream || this.subscribers.get(peer.id) !== subscription) return;
-      const pc = room.getPeers()[peerId];
-      if (pc) await configureVideoSender(pc, this.quality);
-    }).catch(() => {
-      if (this.closed || this.stream !== stream || this.subscribers.get(peer.id) !== subscription) return;
-      this.subscribers.delete(peer.id);
-      this.error = "Uma tela não conectou. A conexão será tentada novamente; verifique as permissões de rede se continuar.";
-      this.emit();
+      try {
+        await Promise.all(room.addStream(delivery, { target: peerId, metadata: { streamId, watchId: subscription.watchId } }));
+        if (this.closed || this.stream !== stream || this.subscribers.get(peer.id) !== subscription) {
+          room.removeStream(delivery, { target: peerId });
+          return;
+        }
+        const pc = room.getPeers()[peerId];
+        if (pc) await configureVideoSender(pc, this.quality);
+      } catch (error) {
+        room.removeStream(delivery, { target: peerId });
+        if (this.subscribers.get(peer.id) === subscription) this.subscribers.delete(peer.id);
+        throw error;
+      }
     });
     this.emit();
   }
 
   setStream(stream: MediaStream | null) {
     if (this.closed) { stream?.getTracks().forEach((track) => track.stop()); return; }
-    for (const { room, peerId, stream: delivery } of this.subscribers.values()) room.removeStream(delivery, { target: peerId });
+    for (const { room, peerId, stream: delivery } of this.subscribers.values()) this.queueMedia(peerId, () => room.removeStream(delivery, { target: peerId }));
     this.subscribers.clear();
     this.stream = stream; this.streamId = stream ? randomSecret() : null; this.revision++;
     this.rooms.forEach((room) => this.announce(room));
@@ -213,7 +237,14 @@ export class FriendsSession {
       const actions = this.actions.get(room)!;
       actions.presence.onMessage = null; actions.watch.onMessage = null;
     }
-    this.leaving = Promise.allSettled(this.rooms.map((room) => room.leave())).then(() => undefined);
+    const connections = new Set(this.rooms.flatMap((room) => Object.values(room.getPeers())));
+    this.leaving = Promise.allSettled(this.rooms.map(async (room) => {
+      try { await room.leave(); }
+      catch {
+        Object.values(room.getPeers()).forEach((connection) => connection.close());
+        await room.leave();
+      }
+    })).then(() => { connections.forEach((connection) => connection.close()); });
     return this.leaving;
   }
 }

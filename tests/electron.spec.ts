@@ -249,3 +249,47 @@ test("dois espectadores retornam sem nova aprovação e remoção revoga o acess
     await expect.poll(() => [...getAudioHelperPids()].filter((pid) => !existingAudioHelpers.has(pid)), { timeout: 5000 }).toEqual([]);
   }
 });
+
+test("salas salvas no Electron transmitem duas telas reais e liberam os capturadores ao sair", async () => {
+  test.setTimeout(150_000);
+  const runId = Date.now();
+  const existingAudioHelpers = getAudioHelperPids();
+  const apps = [];
+  try {
+    for (const profile of ["greg", "ana", "bia"]) apps.push(await launchTela(`infinity-friends-${profile}-${runId}`));
+    const [greg, ana, bia] = await Promise.all(apps.map((app) => app.firstWindow()));
+    for (const page of [greg, ana, bia]) await page.getByRole("button", { name: "Salas de amigos", exact: true }).click();
+    await greg.getByLabel("Seu nome na sala").fill("Greg");
+    await greg.getByLabel("Nome da sala").fill("Amigos Electron");
+    await greg.getByRole("button", { name: "Criar sala", exact: true }).click();
+    await greg.getByRole("button", { name: "Copiar convite", exact: true }).click();
+    const invite = await apps[0].evaluate(({ clipboard }) => clipboard.readText());
+    for (const [page, name] of [[ana, "Ana"], [bia, "Bia"]] as const) {
+      await page.getByLabel("Seu nome na sala").fill(name);
+      await page.getByLabel("Convite da sala").fill(invite);
+      await page.getByRole("button", { name: "Salvar e entrar", exact: true }).click();
+    }
+    for (const page of [greg, ana]) {
+      await page.getByRole("button", { name: "Compartilhar tela", exact: true }).click();
+      await expect(page.locator(".friends-source-grid .source-card").first()).toBeVisible({ timeout: 15_000 });
+      await page.getByRole("button", { name: "Iniciar compartilhamento", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Parar compartilhamento", exact: true })).toBeVisible({ timeout: 15_000 });
+    }
+    for (const name of ["Greg", "Ana"]) {
+      await expect(bia.getByRole("button", { name: `Assistir ${name}`, exact: true })).toBeVisible({ timeout: 35_000 });
+      await bia.getByRole("button", { name: `Assistir ${name}`, exact: true }).click();
+      const video = bia.getByRole("article", { name: `Tela de ${name}`, exact: true }).locator("video");
+      await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.getVideoPlaybackQuality().totalVideoFrames), { timeout: 25_000 }).toBeGreaterThan(3);
+      expect(await video.evaluate((element: HTMLVideoElement) => (element.srcObject as MediaStream).getAudioTracks().length)).toBe(process.platform === "win32" ? 1 : 0);
+    }
+    await bia.getByRole("button", { name: "Sair da sala", exact: true }).click();
+    await bia.reload();
+    await bia.getByRole("button", { name: "Entrar na sala Amigos Electron", exact: true }).click();
+    await expect(bia.getByRole("button", { name: "Assistir Ana", exact: true })).toBeVisible({ timeout: 35_000 });
+    for (const page of [greg, ana]) await page.getByRole("button", { name: "Sair da sala", exact: true }).click();
+    await expect.poll(() => [...getAudioHelperPids()].filter((pid) => !existingAudioHelpers.has(pid)), { timeout: 5_000 }).toEqual([]);
+  } finally {
+    await Promise.allSettled(apps.map((app) => app.close()));
+    await expect.poll(() => [...getAudioHelperPids()].filter((pid) => !existingAudioHelpers.has(pid)), { timeout: 5_000 }).toEqual([]);
+  }
+});

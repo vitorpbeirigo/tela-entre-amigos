@@ -152,7 +152,9 @@ function App() {
   const [hostStarting, setHostStarting] = useState(false);
   const [roomCode, setRoomCode] = useState("");
   const [joinCode, setJoinCode] = useState("");
-  const [viewerName, setViewerName] = useState(() => localStorage.getItem("tela-viewer-name") ?? "");
+  const [viewerName, setViewerName] = useState(() => {
+    try { return localStorage.getItem("tela-viewer-name") ?? ""; } catch { return ""; }
+  });
   const [viewerParticipants, setViewerParticipants] = useState<ViewerParticipant[]>([]);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);

@@ -39,3 +39,12 @@ test("Mac oferece captura sem áudio do sistema para evitar retorno do Discord",
   await expect(page.getByLabel("Compartilhar áudio do computador")).not.toBeChecked();
   await expect(page.getByText(/No Mac, o áudio do sistema também inclui o Discord/)).toBeVisible();
 });
+
+test("armazenamento bloqueado mostra orientação sem derrubar o aplicativo", async ({ page }) => {
+  await mockFriendsDesktop(page);
+  await page.addInitScript(() => Object.defineProperty(window, "localStorage", { configurable: true, get: () => { throw new DOMException("Blocked", "SecurityError"); } }));
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Salas de amigos", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Salas de amigos", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Não foi possível ler as salas salvas");
+});
