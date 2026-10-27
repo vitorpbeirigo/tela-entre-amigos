@@ -81,7 +81,7 @@ npm.cmd run build
 
 O arquivo é criado em `artifacts/Infinity-Setup-<versão>.exe`, junto do manifesto de atualização e `.blockmap`. Os pacotes macOS são gerados pelo GitHub Actions ou num Mac com `npm run build:mac`.
 
-Esta implementação usa `0.10.0-beta.1` para o instalador de teste local. Não há nova release pública nem atualização automática publicada por esta branch.
+As salas de amigos estão incluídas a partir da versão `0.10.0`. Todos os participantes precisam dessa versão ou de uma mais recente para usar as novas salas. O modo anterior por código continua disponível.
 
 ## Publicar
 
