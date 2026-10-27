@@ -46,21 +46,12 @@ import {
 } from "@trystero-p2p/torrent";
 import { createRejoinProof, forgetRoomGrant, isGrant, isSecret, loadRoomGrant, randomSecret, saveRoomGrant, verifyRejoinProof, type RoomGrant } from "./room-access";
 import { createPlaybackStream } from "./playback-stream";
+import { captureDesktopStream, configureVideoSender, QUALITY_PRESETS, type QualityKey, type QualityPreset } from "./screen-media";
+import FriendsHub from "./FriendsHub";
+import { loadSavedRooms } from "./saved-rooms";
 
-type View = "home" | "host-setup" | "host-live" | "viewer-join" | "viewer-live";
+type View = "home" | "host-setup" | "host-live" | "viewer-join" | "viewer-live" | "friends";
 type Role = "host" | "viewer";
-type QualityKey = "performance" | "cinema" | "smooth" | "extreme";
-
-interface QualityPreset {
-  key: QualityKey;
-  label: string;
-  detail: string;
-  width: number;
-  height: number;
-  frameRate: number;
-  maxBitrate: number;
-}
-
 interface ConnectionStats {
   bitrate: string;
   resolution: string;
@@ -88,45 +79,6 @@ interface ViewerConnection extends ViewerParticipant {
   activeRoom?: Room;
   grantId?: string;
 }
-
-const QUALITY_PRESETS: QualityPreset[] = [
-  {
-    key: "performance",
-    label: "Jogar",
-    detail: "720p · 30 FPS · 4 Mbps · menor uso da GPU",
-    width: 1280,
-    height: 720,
-    frameRate: 30,
-    maxBitrate: 4_000_000,
-  },
-  {
-    key: "cinema",
-    label: "Cinema",
-    detail: "1080p · 30 FPS · 10 Mbps",
-    width: 1920,
-    height: 1080,
-    frameRate: 30,
-    maxBitrate: 10_000_000,
-  },
-  {
-    key: "smooth",
-    label: "Suave",
-    detail: "1080p · 60 FPS · 15 Mbps",
-    width: 1920,
-    height: 1080,
-    frameRate: 60,
-    maxBitrate: 15_000_000,
-  },
-  {
-    key: "extreme",
-    label: "Extrema",
-    detail: "1440p · 60 FPS · 24 Mbps",
-    width: 2560,
-    height: 1440,
-    frameRate: 60,
-    maxBitrate: 24_000_000,
-  },
-];
 
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const TRYSTERO_APP_ID = "com.gregpreto.tela.p2p.v1";
@@ -188,7 +140,9 @@ function formatBitrate(bitsPerSecond: number) {
 }
 
 function App() {
-  const [view, setView] = useState<View>("home");
+  const [view, setView] = useState<View>(() => {
+    try { return loadSavedRooms().length ? "friends" : "home"; } catch { return "home"; }
+  });
   const [sources, setSources] = useState<CaptureSource[]>([]);
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [selectedSourceId, setSelectedSourceId] = useState<string>("");
@@ -454,38 +408,12 @@ function App() {
     return track;
   }, [platform, stopFilteredAudio]);
 
-  const configureVideoSender = useCallback(async (pc: RTCPeerConnection, preset: QualityPreset) => {
-    const audioSender = pc.getSenders().find((item) => item.track?.kind === "audio");
-    if (audioSender) {
-      const audioParameters = audioSender.getParameters();
-      audioParameters.encodings = audioParameters.encodings?.length ? audioParameters.encodings : [{}];
-      audioParameters.encodings[0].maxBitrate = 128_000;
-      audioParameters.encodings[0].priority = "high";
-      await audioSender.setParameters(audioParameters).catch(() => undefined);
-    }
-    const sender = pc.getSenders().find((item) => item.track?.kind === "video");
-    if (!sender) return;
-
-    const parameters = sender.getParameters();
-    parameters.degradationPreference = preset.key === "performance" ? "maintain-framerate" : "balanced";
-    parameters.encodings = parameters.encodings?.length ? parameters.encodings : [{}];
-    parameters.encodings[0].maxBitrate = preset.maxBitrate;
-    parameters.encodings[0].maxFramerate = preset.frameRate;
-
-    const settings = sender.track?.getSettings();
-    const scale = Math.max(
-      (settings?.width ?? preset.width) / preset.width,
-      (settings?.height ?? preset.height) / preset.height,
-      1,
-    );
-    parameters.encodings[0].scaleResolutionDownBy = scale > 1.05 ? scale : 1;
-
-    try {
-      await sender.setParameters(parameters);
-    } catch (senderError) {
-      console.warn("O navegador ajustará automaticamente o bitrate", senderError);
-    }
-  }, []);
+  const captureForFriends = useCallback((sourceId: string, preset: QualityPreset, withAudio: boolean, isCurrent: () => boolean) => {
+    const epoch = sessionEpochRef.current;
+    return captureDesktopStream({ sourceId, preset, platform, withAudio,
+      isCurrent: () => sessionEpochRef.current === epoch && isCurrent(),
+      createAudioTrack: () => createFilteredAudioTrack(epoch) });
+  }, [platform, createFilteredAudioTrack]);
 
   const syncViewerParticipants = useCallback(() => {
     const participants = [...viewerConnectionsRef.current.values()].map(({ peerId, name, status, strategy }) => ({
@@ -1055,21 +983,8 @@ function App() {
       await leavingRoomsRef.current;
       if (!isCurrent()) return;
       const turnServersPromise = window.telaDesktop.getTurnServers().catch(() => []);
-      await window.telaDesktop.selectSource(selectedSourceId);
-      if (!isCurrent()) return;
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          width: { ideal: quality.width },
-          height: { ideal: quality.height },
-          frameRate: { ideal: quality.frameRate, max: quality.frameRate },
-        },
-        audio: platform === "darwin",
-      });
-      if (!isCurrent()) { stream.getTracks().forEach((track) => track.stop()); return; }
-      if (platform === "win32") {
-        const filteredAudioTrack = await createFilteredAudioTrack(epoch);
-        stream.addTrack(filteredAudioTrack);
-      }
+      stream = await captureDesktopStream({ sourceId: selectedSourceId, preset: quality, platform, withAudio: true,
+        isCurrent, createAudioTrack: () => createFilteredAudioTrack(epoch) });
 
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
@@ -1339,7 +1254,10 @@ function App() {
             <h1>Sua tela.<br /><span>Sem distância.</span></h1>
             <p>Vídeo e áudio em alta qualidade, direto entre os computadores dos seus amigos. Sem cadastro, sem gravação e sem servidor de vídeo no meio.</p>
             <div className="home-actions">
-              <button className="button button-primary" onClick={openHostSetup}>
+              <button className="button button-primary" onClick={() => { setError(""); setView("friends"); }}>
+                <Users size={18} /> Salas de amigos
+              </button>
+              <button className="button button-secondary" onClick={openHostSetup}>
                 <MonitorUp size={18} /> Compartilhar minha tela
               </button>
               <button className="button button-ghost" onClick={openViewerJoin}>
@@ -1455,6 +1373,8 @@ function App() {
           </div>
         </section>
       )}
+
+      {view === "friends" && <FriendsHub platform={platform} capture={captureForFriends} stopAudio={stopFilteredAudio} onBack={leaveSession} captureError={error} />}
 
       {view === "viewer-join" && (
         <section className="join-page page-enter">
