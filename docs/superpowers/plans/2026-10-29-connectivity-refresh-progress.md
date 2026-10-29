@@ -29,4 +29,12 @@ Prévia Vercel pronta: `dpl_H77rws9jTAVfDsbhwFe6PAJnfxqZ`. O projeto existente `
 
 Teste final do executável Windows empacotado passou (1/1, 15.3s), com três processos, duas capturas reais e limpeza de helpers. Nova conferência imediatamente antes do commit: `npm audit` exit 0, zero vulnerabilidades; `npm outdated` retornou `{}`.
 
-Publicação estável e verificação pública ainda pendentes neste registro. Limites: sem teste WAN no computador afetado; sem teste interativo em hardware Mac; P2P continua dependente das rotas de rede disponíveis.
+Publicação estável concluída: **v0.11.0**, tag no commit `1054696bc948c7a9ed17565c53051b73ffec2c0c`, integrada em main por fast-forward. GitHub Actions **40960367852** passou Windows x64 (2m49), macOS Intel/Apple Silicon (4m12, ambas assinaturas ad hoc verificadas) e publicação. Release não draft/nem prerelease, marcada como latest, 12 assets uploaded, notas em `docs/releases/v0.11.0.md`.
+
+Site de produção **Ready**, deployment `dpl_EyJsjrj3ki364FVRkGSRQwQtcRjS`, alias `https://zeroinfinity.vercel.app/`. HTML público HTTP 200 com aviso 0.11.0 e macOS13; API HTTP200 tag v0.11.0; os três `/baixar/*` retornam302 para os instaladores correspondentes. Manifestos públicos `latest.yml`/`latest-mac.yml` HTTP200 version0.11.0; página pública da release HTTP200. O conector confirmou novamente projeto sem vínculo Git e Node24 gerenciado pela Vercel. A prévia protegida foi lida com autenticação autorizada, sem desativar proteção.
+
+A consulta anônima à API GitHub atingiu limite403 no IP do agente; os metadados da release foram confirmados pela API autenticada e os manifestos/downloads/página pelo acesso público. O serviço do site respondeu200 normalmente. Os32 alertas GitHub ainda abertos tinham atualização anterior ao release:31 não correspondem às versões do lock remoto1054696 e um (sprintf-js/GHSA-hp3w-g68c-fv3c) é advisory retirado oficialmente em22/10. Não se dispensou nenhum alerta para obter o resultado de auditoria.
+
+Windows usa atualização pelo app; Mac continua com download/substituição manual. **Todos devem estar na0.11.0 para se encontrar; convites preservados.** Limites: sem teste WAN no computador afetado; sem teste interativo em hardware Mac; P2P continua dependente das rotas de rede disponíveis.
+
+Release: https://github.com/vitorpbeirigo/tela-entre-amigos/releases/tag/v0.11.0

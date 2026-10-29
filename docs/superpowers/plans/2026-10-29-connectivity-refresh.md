@@ -33,7 +33,7 @@
 - [x] Transport and diagnostics: test candidate-bundling configuration and redacted pending-transport diagnostics; implement a scoped rtcPolyfill and safe copy action in FriendsHub. Owner: principal; transport module, FriendsHub, CSS and corresponding tests.
 - [x] Integration: typecheck/build, complete browser/Electron suite, simulated trickle-candidate loss with full-ICE fallback, three/four clients and returning members, packaged Windows smoke and cleanup.
 - [x] Independent review: fix important findings before commit/release. Recheck changes and secret boundaries.
-- [ ] Publish: bump release version, notes, main/tag, Windows and both Mac architectures, inspect CI and verify public metadata/download redirects/manifests. Update project progress with proof and limits.
+- [x] Publish: bump release version, notes, main/tag, Windows and both Mac architectures, inspect CI and verify public metadata/download redirects/manifests. Update project progress with proof and limits.
 
 ## Workspace
 
