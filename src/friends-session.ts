@@ -33,7 +33,10 @@ export class FriendsSession {
   private error = "";
   private heartbeat: ReturnType<typeof setInterval>;
   private leaving: Promise<void> | null = null;
-  private failures = new Map<Room, RouteFailure>();
+  private failures = new Map<Room, Map<string, RouteFailure>>();
+  private discovery = new Map<Room, { nextRetryAt: number; attempts: number }>();
+  private deferred = new Set<Room>();
+  private retrying = false;
   private recovering = new Set<Room>();
   private iceRestarts = new WeakMap<RTCPeerConnection, number>();
 
@@ -50,6 +53,7 @@ export class FriendsSession {
   private bindRoom(room: Room) {
       const presence = room.makeAction("fr-pres"), watch = room.makeAction("fr-watch");
       this.actions.set(room, { presence, watch });
+      if (!this.discovery.has(room)) this.discovery.set(room, { nextRetryAt: Date.now() + 45_000, attempts: 0 });
       room.onPeerJoin = (peerId) => { if (!this.closed && !this.recovering.has(room)) this.announce(room, peerId); };
       room.onPeerLeave = (peerId) => this.peerLeft(room, peerId);
       presence.onMessage = (data, { peerId }) => this.presence(room, peerId, data);
@@ -74,9 +78,11 @@ export class FriendsSession {
         id, name, streamId, quality, revision, connected: routes.size > 0, stream: playback?.stream ?? null,
       })),
       watching: [...this.watching], viewers: this.subscribers.size, streamId: this.streamId, quality: this.quality.key, error: this.error,
-      connectionNotice: [...this.failures.values()].some((failure) => failure.kind === "password")
+      connectionNotice: [...this.failures.values()].some((failures) => [...failures.values()].some((failure) => failure.kind === "password"))
         ? "O convite de um participante não corresponde ao desta sala. Importe o convite atual do grupo."
-        : this.failures.size ? "Reconectando um participante automaticamente. Quem já conectou continua na sala." : "",
+        : this.failures.size ? this.deferred.size
+          ? "Reconexão adiada para preservar quem está conectado. As tentativas continuam quando houver outra rota ativa."
+          : "Reconectando um participante. As tentativas continuam automaticamente." : "",
     };
   }
 
@@ -86,50 +92,86 @@ export class FriendsSession {
   }
 
   reportRouteFailure(room: Room, error: string, peerId: string, strategy: string) {
-    if (this.closed || !this.actions.has(room)) return;
+    if (this.closed || this.recovering.has(room) || !this.actions.has(room)) return;
     if ([...this.peers.values()].some((peer) => peer.peerId === peerId && peer.routes.size > 0)) return;
     const kind = /password/i.test(error) ? "password" : /could not connect|exchanging SDP/i.test(error) ? "direct" : "discovery";
-    const previous = this.failures.get(room);
-    this.failures.set(room, { kind, peerId, strategy, attempts: previous?.attempts ?? 0,
+    const failures = this.failures.get(room) ?? new Map<string, RouteFailure>();
+    const previous = failures.get(peerId);
+    failures.set(peerId, { kind, peerId, strategy, attempts: previous?.attempts ?? 0,
       nextRetryAt: previous?.nextRetryAt ?? Date.now() + 5_000 });
+    this.failures.set(room, failures);
     this.log("friends-route-failed", { strategy, reason: kind, peer: peerId.slice(0, 8) });
     this.emit();
   }
 
   async retryConnections(force = false) {
-    if (this.closed) return;
-    const now = Date.now();
-    const connections = new Set(this.rooms.flatMap((room) => Object.values(room.getPeers())));
-    for (const pc of connections) {
-      if (!["disconnected", "failed"].includes(pc.connectionState) || now - (this.iceRestarts.get(pc) ?? 0) < 10_000) continue;
-      this.iceRestarts.set(pc, now);
-      try { pc.restartIce(); this.log("friends-ice-retry", { state: pc.connectionState }); } catch { /* Discovery can still rebuild a closed transport. */ }
+    if (this.closed || this.retrying) return;
+    this.retrying = true;
+    try {
+      const now = Date.now();
+      const connections = new Set(this.rooms.flatMap((room) => Object.values(room.getPeers())));
+      for (const pc of connections) {
+        if (!["disconnected", "failed"].includes(pc.connectionState) || now - (this.iceRestarts.get(pc) ?? 0) < 10_000) continue;
+        this.iceRestarts.set(pc, now);
+        try { pc.restartIce(); this.log("friends-ice-retry", { state: pc.connectionState }); } catch { /* Discovery can still rebuild a closed transport. */ }
+      }
+      this.peers.forEach((peer) => this.subscribe(peer));
+      for (const room of [...this.rooms]) {
+        if (this.closed) break;
+        const failures = this.failures.get(room);
+        const discovery = this.discovery.get(room)!;
+        const failure = [...failures?.values() ?? []].find((item) => item.kind !== "password" && (force || Date.now() >= item.nextRetryAt));
+        const silent = !failures?.size && !Object.keys(room.getPeers()).length &&
+          ![...this.peers.values()].some((peer) => peer.routes.has(room)) && (force || Date.now() >= discovery.nextRetryAt);
+        this.deferred.delete(room);
+        if (!this.reopen || this.recovering.has(room) || (!failure && !silent)) continue;
+        if (!this.canReopen(room)) { this.deferred.add(room); continue; }
+        this.recovering.add(room);
+        const attempt = discovery.attempts + 1;
+        discovery.attempts = attempt;
+        discovery.nextRetryAt = Date.now() + Math.min(45_000 * (attempt + 1), 180_000);
+        failures?.forEach((item) => { item.nextRetryAt = Date.now() + Math.min(30_000 * (item.attempts + 1), 60_000); });
+        try {
+          await this.leaveRoute(room);
+          if (this.closed) break;
+          const index = this.rooms.indexOf(room);
+          if (index < 0) continue;
+          for (const peer of [...this.peers.values()]) {
+            const peerId = peer.routes.get(room);
+            if (peerId) this.peerLeft(room, peerId);
+          }
+          if (this.closed) break;
+          const replacement = this.reopen(room);
+          room.onPeerJoin = null; room.onPeerLeave = null; room.onPeerStream = null;
+          const actions = this.actions.get(room);
+          if (actions) { actions.presence.onMessage = null; actions.watch.onMessage = null; }
+          const remainingFailures = this.failures.get(room);
+          this.actions.delete(room); this.failures.delete(room); this.discovery.delete(room);
+          this.rooms[index] = replacement;
+          this.discovery.set(replacement, discovery);
+          if (remainingFailures?.size) this.failures.set(replacement, new Map([...remainingFailures].map(([peerId, item]) =>
+            [peerId, { ...item, attempts: item.attempts + 1 }])));
+          this.bindRoom(replacement);
+          this.log("friends-discovery-retry", { strategy: failure?.strategy ?? "discovery", attempt });
+          this.emit();
+        } catch { this.log("friends-discovery-retry-failed", { strategy: failure?.strategy ?? "discovery" }); }
+        finally { this.recovering.delete(room); }
+      }
+      this.emit();
+    } finally { this.retrying = false; }
+  }
+
+  private canReopen(room: Room) {
+    const peerIds = new Set(Object.keys(room.getPeers()));
+    for (const peer of this.peers.values()) {
+      const peerId = peer.routes.get(room);
+      if (peerId) peerIds.add(peerId);
     }
-    this.peers.forEach((peer) => this.subscribe(peer));
-    await Promise.all([...this.failures.entries()].map(async ([room, failure]) => {
-      if (!this.reopen || failure.kind === "password" || this.recovering.has(room) || (!force && now < failure.nextRetryAt)) return;
-      if ([...this.peers.values()].some((peer) => peer.routes.has(room)) || Object.keys(room.getPeers()).length > 0) return;
-      this.recovering.add(room);
-      failure.nextRetryAt = now + Math.min(30_000 * (failure.attempts + 1), 60_000);
-      try {
-        await this.leaveRoute(room);
-        if (this.closed) return;
-        const index = this.rooms.indexOf(room);
-        if (index < 0) return;
-        const remainingFailure = this.failures.get(room);
-        const replacement = this.reopen(room);
-        room.onPeerJoin = null; room.onPeerLeave = null; room.onPeerStream = null;
-        const actions = this.actions.get(room);
-        if (actions) { actions.presence.onMessage = null; actions.watch.onMessage = null; }
-        this.actions.delete(room); this.failures.delete(room);
-        this.rooms[index] = replacement;
-        this.bindRoom(replacement);
-        if (remainingFailure) this.failures.set(replacement, { ...remainingFailure, attempts: remainingFailure.attempts + 1 });
-        this.log("friends-discovery-retry", { strategy: failure.strategy, attempt: failure.attempts + 1 });
-        this.emit();
-      } catch { this.log("friends-discovery-retry-failed", { strategy: failure.strategy }); }
-      finally { this.recovering.delete(room); }
-    }));
+    return [...peerIds].every((peerId) => {
+      const peer = this.findPeer(room, peerId);
+      return peer && [...peer.routes].some(([other, otherId]) => other !== room && !this.recovering.has(other) &&
+        this.actions.has(other) && other.getPeers()[otherId]?.connectionState === "connected");
+    });
   }
 
   private async leaveRoute(room: Room) {
@@ -163,7 +205,12 @@ export class FriendsSession {
     if (!isSecret(data.id) || data.id === this.id || typeof data.name !== "string" || !data.name ||
       data.name.length > 48 || data.name !== cleanName(data.name) || (data.streamId !== null && !isSecret(data.streamId)) ||
       !QUALITY_PRESETS.some((preset) => preset.key === data.quality) || !Number.isSafeInteger(data.revision) || data.revision < 0) return;
-    for (const [failedRoom, failure] of this.failures) if (failure.peerId === peerId || !failure.peerId) this.failures.delete(failedRoom);
+    for (const [failedRoom, failures] of this.failures) {
+      failures.delete(peerId);
+      if (failedRoom === room) failures.delete("");
+      if (!failures.size) { this.failures.delete(failedRoom); this.deferred.delete(failedRoom); }
+    }
+    this.discovery.set(room, { nextRetryAt: Date.now() + 45_000, attempts: 0 });
     let peer = this.peers.get(data.id);
     if (!peer) {
       peer = { id: data.id, name: data.name, streamId: data.streamId, quality: data.quality,
@@ -323,7 +370,7 @@ export class FriendsSession {
       actions.presence.onMessage = null; actions.watch.onMessage = null;
     }
     const connections = new Set(this.rooms.flatMap((room) => Object.values(room.getPeers())));
-    this.failures.clear();
+    this.failures.clear(); this.discovery.clear(); this.deferred.clear();
     this.leaving = Promise.allSettled(this.rooms.map((room) => this.leaveRoute(room)))
       .then(() => { connections.forEach((connection) => connection.close()); });
     return this.leaving;

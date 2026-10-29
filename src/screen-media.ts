@@ -34,24 +34,58 @@ export async function captureDesktopStream(options: {
   } catch (error) { stream.getTracks().forEach((track) => track.stop()); throw error; }
 }
 
+const pendingSenderSettings = new WeakMap<RTCPeerConnection, () => void>();
+
 export async function configureVideoSender(pc: RTCPeerConnection, preset: QualityPreset) {
-  const audioSender = pc.getSenders().find((item) => item.track?.kind === "audio");
-  if (audioSender) {
-    const parameters = audioSender.getParameters();
-    parameters.encodings = parameters.encodings?.length ? parameters.encodings : [{}];
-    parameters.encodings[0].maxBitrate = 128_000;
-    parameters.encodings[0].priority = "high";
-    await audioSender.setParameters(parameters).catch(() => undefined);
-  }
-  const sender = pc.getSenders().find((item) => item.track?.kind === "video");
-  if (!sender) return;
-  const parameters = sender.getParameters();
-  parameters.degradationPreference = preset.key === "performance" ? "maintain-framerate" : "balanced";
-  parameters.encodings = parameters.encodings?.length ? parameters.encodings : [{}];
-  parameters.encodings[0].maxBitrate = preset.maxBitrate;
-  parameters.encodings[0].maxFramerate = preset.frameRate;
-  const settings = sender.track?.getSettings();
-  const scale = Math.max((settings?.width ?? preset.width) / preset.width, (settings?.height ?? preset.height) / preset.height, 1);
-  parameters.encodings[0].scaleResolutionDownBy = scale > 1.05 ? scale : 1;
-  await sender.setParameters(parameters).catch((error) => console.warn("O navegador ajustará automaticamente o bitrate", error));
+  pendingSenderSettings.get(pc)?.();
+  const senders = pc.getSenders().filter((sender) => ["audio", "video"].includes(sender.track?.kind ?? ""));
+  if (!senders.length || pc.connectionState === "closed") return;
+  const tracks = senders.flatMap((sender) => sender.track ? [sender.track] : []);
+  let cancelled = false;
+  const ready = () => pc.signalingState === "stable" && pc.getTransceivers()
+    .filter((transceiver) => senders.includes(transceiver.sender) && transceiver.sender.track?.readyState === "live")
+    .every((transceiver) => transceiver.currentDirection === "sendonly" || transceiver.currentDirection === "sendrecv");
+  const detach = () => {
+    pc.removeEventListener("signalingstatechange", changed); pc.removeEventListener("connectionstatechange", changed);
+    tracks.forEach((track) => track.removeEventListener("ended", changed));
+  };
+  const cancel = () => {
+    cancelled = true; detach();
+    if (pendingSenderSettings.get(pc) === cancel) pendingSenderSettings.delete(pc);
+  };
+  const apply = async () => {
+    detach();
+    try {
+      for (const sender of senders) for (let attempt = 0; attempt < 2; attempt++) {
+        if (cancelled || pc.connectionState === "closed") return;
+        if (!sender.track || sender.track.readyState === "ended") break;
+        const parameters = sender.getParameters();
+        if (!parameters.encodings?.length) break;
+        const encoding = parameters.encodings[0];
+        if (sender.track?.kind === "audio") { encoding.maxBitrate = 128_000; encoding.priority = "high"; }
+        else {
+          parameters.degradationPreference = preset.key === "performance" ? "maintain-framerate" : "balanced";
+          encoding.maxBitrate = preset.maxBitrate; encoding.maxFramerate = preset.frameRate;
+          const settings = sender.track?.getSettings();
+          const scale = Math.max((settings?.width ?? preset.width) / preset.width, (settings?.height ?? preset.height) / preset.height, 1);
+          encoding.scaleResolutionDownBy = scale > 1.05 ? scale : 1;
+        }
+        try { await sender.setParameters(parameters); break; }
+        catch (error) {
+          // Renegotiation can change read-only RTCP values after getParameters().
+          if (attempt === 0 && error instanceof Error && error.name === "InvalidModificationError") continue;
+          console.warn("O navegador ajustará automaticamente o bitrate", error); break;
+        }
+      }
+    } finally { if (pendingSenderSettings.get(pc) === cancel) pendingSenderSettings.delete(pc); }
+  };
+  const changed = () => {
+    if (pc.connectionState === "closed" || senders.every((sender) => !sender.track || sender.track.readyState === "ended")) cancel();
+    else if (ready()) void apply();
+  };
+  pendingSenderSettings.set(pc, cancel);
+  if (ready()) { await apply(); return; }
+  // Keep the latest preset until negotiation finishes, without blocking media teardown.
+  pc.addEventListener("signalingstatechange", changed); pc.addEventListener("connectionstatechange", changed);
+  tracks.forEach((track) => track.addEventListener("ended", changed));
 }

@@ -4,7 +4,7 @@ export async function mockFriendsDesktop(page: Page, platform = "win32") {
   await page.addInitScript((desktopPlatform) => {
     const thumbnail = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#062f34"/></svg>');
     (window as any).telaDesktop = {
-      getVersion: async () => "0.9.7-test", getPlatform: async () => desktopPlatform,
+      getVersion: async () => "0.11.0-test", getPlatform: async () => desktopPlatform,
       getConnectionPermission: async () => ({ state: "allowed" }), requestConnectionPermission: async () => ({ state: "allowed" }),
       getCapturePermission: async () => "granted", requestCapturePermission: async () => "granted",
       openCaptureSettings: async () => true, openConnectionSettings: async () => true,

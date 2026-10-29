@@ -48,3 +48,17 @@ test("armazenamento bloqueado mostra orientação sem derrubar o aplicativo", as
   await page.getByRole("button", { name: "Salas de amigos", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Não foi possível ler as salas salvas");
 });
+
+test("diagnóstico copiável preserva convite e explica atualização conjunta na sala", async ({ page }) => {
+  await mockFriendsDesktop(page); await page.setViewportSize({ width: 960, height: 680 }); await page.goto("/");
+  const invite = await createFriendsRoom(page);
+  await expect(page.getByText("Todos da sala precisam atualizar para o Infinity 0.11.0. O convite continua o mesmo.")).toBeVisible();
+  await page.getByRole("button", { name: "Copiar diagnóstico de conexão", exact: true }).click();
+  await expect(page.getByText("Diagnóstico copiado", { exact: true })).toBeVisible();
+  const report = await page.evaluate(() => sessionStorage.getItem("copied-invite"));
+  expect(JSON.parse(report!)).toMatchObject({ app: "Infinity", version: "0.11.0-test", protocol: 2, participants: 1 });
+  expect(report).not.toContain(invite);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole("button", { name: "Copiar convite", exact: true }).click();
+  expect(await page.evaluate(() => sessionStorage.getItem("copied-invite"))).toBe(invite);
+});

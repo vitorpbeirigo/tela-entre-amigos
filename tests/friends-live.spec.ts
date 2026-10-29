@@ -45,6 +45,9 @@ test("três clientes: duas telas simultâneas, mosaico, retorno e sala sem criad
     for (const page of [greg, ana]) {
       await expect.poll(() => page.evaluate(() => ((window as any).__friendsPCs as RTCPeerConnection[])
         .filter((pc) => pc.connectionState === "connected").flatMap((pc) => pc.getSenders()).filter((sender) => sender.track?.kind === "video").length)).toBe(1);
+      await expect.poll(() => page.evaluate(() => ((window as any).__friendsPCs as RTCPeerConnection[])
+        .filter((pc) => pc.connectionState === "connected").flatMap((pc) => pc.getSenders())
+        .filter((sender) => sender.track?.kind === "video").map((sender) => sender.getParameters().encodings[0]?.maxBitrate))).toEqual([4_000_000]);
     }
     await bia.screenshot({ path: "artifacts/qa/friends-mosaic.png", fullPage: true });
     await bia.getByRole("button", { name: "Foco", exact: true }).click();
@@ -58,6 +61,9 @@ test("três clientes: duas telas simultâneas, mosaico, retorno e sala sem criad
     await expectVideo(bia, "Greg");
     await greg.getByLabel("Qualidade da sua transmissão").selectOption("cinema");
     await expectVideo(bia, "Greg");
+    await expect.poll(() => greg.evaluate(() => ((window as any).__friendsPCs as RTCPeerConnection[])
+      .filter((pc) => pc.connectionState === "connected").flatMap((pc) => pc.getSenders())
+      .filter((sender) => sender.track?.kind === "video").map((sender) => sender.getParameters().encodings[0]?.maxBitrate))).toEqual([10_000_000]);
     await bia.getByRole("article", { name: "Tela de Greg", exact: true }).getByRole("button", { name: "Parar de assistir Greg", exact: true }).click();
     await bia.getByRole("button", { name: "Assistir Greg", exact: true }).click();
     await expectVideo(bia, "Greg");

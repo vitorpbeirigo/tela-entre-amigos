@@ -46,6 +46,7 @@ import {
 } from "@trystero-p2p/torrent";
 import { createRejoinProof, forgetRoomGrant, isGrant, isSecret, loadRoomGrant, randomSecret, saveRoomGrant, verifyRejoinProof, type RoomGrant } from "./room-access";
 import { createPlaybackStream } from "./playback-stream";
+import { getTransportConfig, resetConnectionDiagnostics } from "./connection-diagnostics";
 import { captureDesktopStream, configureVideoSender, QUALITY_PRESETS, type QualityKey, type QualityPreset } from "./screen-media";
 import FriendsHub from "./FriendsHub";
 import { loadSavedRooms } from "./saved-rooms";
@@ -81,7 +82,7 @@ interface ViewerConnection extends ViewerParticipant {
 }
 
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const TRYSTERO_APP_ID = "com.gregpreto.tela.p2p.v1";
+const TRYSTERO_APP_ID = "com.gregpreto.tela.p2p.v2";
 const CONNECTION_TIMEOUT_MS = 20_000;
 const PARTICLE_COLORS = ["#19d0e8", "#44ccff", "#617176", "#ffffff", "#062f34"];
 function seededValue(index: number, salt: number) {
@@ -449,6 +450,7 @@ function App() {
       sessionTimersRef.current.add(timer);
     };
     const roomId = code.replaceAll("-", "");
+    resetConnectionDiagnostics();
     const roomConfig = {
       appId: TRYSTERO_APP_ID,
       password: roomId,
@@ -470,15 +472,15 @@ function App() {
     const strategyRooms = [
       {
         strategy: "Nostr",
-        room: joinNostrRoom(roomConfig, roomId, { onJoinError: onJoinError("Nostr") }),
+        room: joinNostrRoom({ ...roomConfig, ...getTransportConfig("Nostr") }, roomId, { onJoinError: onJoinError("Nostr") }),
       },
       {
         strategy: "MQTT",
-        room: joinMqttRoom(roomConfig, roomId, { onJoinError: onJoinError("MQTT") }),
+        room: joinMqttRoom({ ...roomConfig, ...getTransportConfig("MQTT") }, roomId, { onJoinError: onJoinError("MQTT") }),
       },
       {
         strategy: "Torrent",
-        room: joinTorrentRoom(roomConfig, roomId, { onJoinError: onJoinError("Torrent") }),
+        room: joinTorrentRoom({ ...roomConfig, ...getTransportConfig("Torrent") }, roomId, { onJoinError: onJoinError("Torrent") }),
       },
     ];
     roomRefs.current = strategyRooms.map(({ room }) => room);

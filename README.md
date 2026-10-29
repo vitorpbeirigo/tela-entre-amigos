@@ -24,7 +24,7 @@ O anfitrião escolhe entre 720p30, 1080p30, 1080p60 e 1440p60. A qualidade pode 
 
 - `Infinity-<versão>-mac-arm64.dmg`: Apple Silicon (M1, M2, M3, M4 ou mais novo).
 - `Infinity-<versão>-mac-x64.dmg`: Macs Intel.
-- Recomendado: macOS 13 ou mais recente para capturar o áudio do sistema sem driver virtual.
+- Requisito: macOS 13 Ventura ou mais recente, em Intel ou Apple Silicon.
 
 Esta edição gratuita usa assinatura ad hoc local, sem certificado Developer ID e sem notarização paga da Apple. Por isso o macOS pode bloquear a primeira abertura mesmo sem ter detectado malware.
 
@@ -81,7 +81,9 @@ npm.cmd run build
 
 O arquivo é criado em `artifacts/Infinity-Setup-<versão>.exe`, junto do manifesto de atualização e `.blockmap`. Os pacotes macOS são gerados pelo GitHub Actions ou num Mac com `npm run build:mac`.
 
-As salas de amigos estão incluídas a partir da versão `0.10.0`. Todos os participantes precisam dessa versão ou de uma mais recente para usar as novas salas. O modo anterior por código continua disponível.
+Na atualização `0.11.0`, todos os participantes precisam atualizar juntos: o motor de conexão mudou o protocolo interno. Os convites e salas salvas continuam válidos; aplicativos `0.10.x` ficam separados dos atualizados para evitar falhas silenciosas por incompatibilidade. O modo anterior por código continua disponível entre aplicativos atualizados.
+
+Se um amigo continuar isolado, use **Diagnóstico** na sala e envie o texto copiado ao suporte. Ele contém somente versão, estados de conexão e contagens de candidatos, sem convite, senha, IP, porta, SDP ou conteúdo de áudio/vídeo. **Atualizar conexões** renova as rotas que podem ser recuperadas sem perder a única conexão de um participante.
 
 ## Publicar
 

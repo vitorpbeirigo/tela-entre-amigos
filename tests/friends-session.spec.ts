@@ -287,3 +287,93 @@ test("presença durante leave não publica rota encerrando nem restaura aviso j�
     expect(session.snapshot().members[0].connected).toBe(true);
   } finally { release(); await session.close(); }
 });
+
+test("rota silenciosa tenta novamente após 45 segundos, sem inventar participante e com backoff", async () => {
+  const a = harness(), replacement = harness(); let restarts = 0;
+  const originalNow = Date.now; let now = originalNow(); Date.now = () => now;
+  const session = new FriendsSession(localId, "Eu", [a.room], () => undefined, () => { restarts++; return replacement.room; });
+  try {
+    now += 44_999; await session.retryConnections(); expect(restarts).toBe(0);
+    now++; await session.retryConnections(); expect(restarts).toBe(1);
+    expect(session.snapshot().members).toEqual([]); expect(session.snapshot().connectionNotice).toBe("");
+    expect(replacement.sends.find((item) => item.action === "fr-pres")?.data.id).toBe(localId);
+    now += 45_000; await session.retryConnections(); expect(restarts).toBe(1);
+    now += 45_000; await session.retryConnections(); expect(restarts).toBe(2);
+  } finally { Date.now = originalNow; await session.close(); }
+});
+
+test("atualização manual reabre rotas vazias imediatamente em sequência e sem duplicar chamadas", async () => {
+  const a = harness(), b = harness(), nextA = harness(), nextB = harness();
+  const leaves: string[] = [], reopened: Room[] = [];
+  let release!: () => void, hold = true;
+  a.room.leave = async () => { leaves.push("a"); if (hold) await new Promise<void>((resolve) => { release = resolve; }); };
+  b.room.leave = async () => { leaves.push("b"); };
+  const session = new FriendsSession(localId, "Eu", [a.room, b.room], () => undefined, (room) => {
+    reopened.push(room); return room === a.room ? nextA.room : nextB.room;
+  });
+  try {
+    const first = session.retryConnections(true), second = session.retryConnections(true);
+    expect(leaves).toEqual(["a"]); expect(reopened).toEqual([]);
+    release(); await Promise.all([first, second]);
+    expect(leaves).toEqual(["a", "b"]); expect(reopened).toEqual([a.room, b.room]);
+    expect(session.snapshot().members).toEqual([]); expect(session.snapshot().connectionNotice).toBe("");
+  } finally { hold = false; release?.(); await session.close(); }
+});
+
+test("falhas de participantes diferentes na mesma rota não apagam o aviso uma da outra", async () => {
+  const a = harness(), b = harness();
+  const session = new FriendsSession(localId, "Eu", [a.room, b.room], () => undefined);
+  try {
+    session.reportRouteFailure(a.room, "could not connect", "missing-one", "MQTT");
+    session.reportRouteFailure(a.room, "could not connect", "missing-two", "MQTT");
+    b.presence(null, "c".repeat(64), "missing-two");
+    expect(session.snapshot().connectionNotice).not.toBe("");
+    b.presence(null, "d".repeat(64), "missing-one");
+    expect(session.snapshot().connectionNotice).toBe("");
+  } finally { await session.close(); }
+});
+
+test("reabre rota ocupada somente com outra presença e PC conectado para todos", async () => {
+  const a = harness(), b = harness(), replacement = harness(); let restarts = 0;
+  const active: Record<string, RTCPeerConnection> = { peer: { connectionState: "connected", close: () => undefined } as RTCPeerConnection };
+  a.room.getPeers = () => active;
+  const backup = { connectionState: "disconnected", restartIce: () => undefined, close: () => undefined } as RTCPeerConnection;
+  const alternatives: Record<string, RTCPeerConnection> = { peer: backup };
+  b.room.getPeers = () => alternatives;
+  const session = new FriendsSession(localId, "Eu", [a.room, b.room], () => undefined, () => { restarts++; return replacement.room; });
+  try {
+    a.presence();
+    session.reportRouteFailure(a.room, "could not connect", "missing", "MQTT");
+    await session.retryConnections(true); expect(restarts).toBe(0);
+    b.presence(); await session.retryConnections(true); expect(restarts).toBe(0);
+    expect(session.snapshot().connectionNotice).toContain("adiada");
+    Object.defineProperty(backup, "connectionState", { value: "connected", configurable: true });
+    active.other = backup;
+    await session.retryConnections(true); expect(restarts).toBe(0);
+    a.presence(null, "c".repeat(64), "other"); b.presence(null, "c".repeat(64), "other");
+    await session.retryConnections(true); expect(restarts).toBe(0);
+    alternatives.other = backup;
+    await session.retryConnections(true); expect(restarts).toBe(1);
+    expect(session.snapshot().members[0].connected).toBe(true);
+  } finally { await session.close(); }
+});
+
+test("recuperações concorrentes revalidam alternativas sem fechar as duas rotas saudáveis", async () => {
+  const a = harness(), b = harness(), replacement = harness(); let aLeaves = 0, bLeaves = 0;
+  const connected = { connectionState: "connected", close: () => undefined } as RTCPeerConnection;
+  a.room.getPeers = b.room.getPeers = () => ({ peer: connected });
+  let release!: () => void, hold = true;
+  a.room.leave = async () => { aLeaves++; if (hold && aLeaves === 1) await new Promise<void>((resolve) => { release = resolve; }); };
+  b.room.leave = async () => { bLeaves++; };
+  const session = new FriendsSession(localId, "Eu", [a.room, b.room], () => undefined, () => replacement.room);
+  try {
+    a.presence(); b.presence();
+    session.reportRouteFailure(a.room, "could not connect", "missing", "Nostr");
+    session.reportRouteFailure(b.room, "could not connect", "missing", "MQTT");
+    const first = session.retryConnections(true), second = session.retryConnections(true);
+    expect(aLeaves).toBe(1); expect(bLeaves).toBe(0);
+    release(); await Promise.all([first, second]);
+    expect(aLeaves).toBe(1); expect(bLeaves).toBe(0);
+    expect(session.snapshot().members[0].connected).toBe(true);
+  } finally { hold = false; release?.(); await session.close(); }
+});

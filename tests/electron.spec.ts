@@ -136,6 +136,20 @@ test("dois espectadores retornam sem nova aprovação e remoção revoga o acess
       window.RTCPeerConnection = class extends Original {
         constructor(config?: RTCConfiguration) { super(config); (window as any).__testPeers.push(this); }
       };
+      const stages: string[] = (window as any).__testCaptureStages = [];
+      const getDisplayMedia = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices);
+      navigator.mediaDevices.getDisplayMedia = async (options) => {
+        stages.push("capture-requested");
+        try {
+          const stream = await getDisplayMedia(options);
+          stages.push("capture-ready");
+          stream.getTracks().forEach((track) => track.addEventListener("ended", () => stages.push("capture-ended")));
+          return stream;
+        } catch (error) {
+          stages.push(`capture-error:${error instanceof Error ? error.name : "unknown"}`);
+          throw error;
+        }
+      };
     });
   };
   const join = async (page: Page, name: string, code: string) => {
@@ -235,7 +249,12 @@ test("dois espectadores retornam sem nova aprovação e remoção revoga o acess
     await host.getByRole("button", { name: /Compartilhar minha tela/i }).click();
     await expect(host.locator(".source-card").first()).toBeVisible({ timeout: 15_000 });
     await host.getByRole("button", { name: /Iniciar transmissão/i }).click();
-    await expect(host.locator(".room-code-copy span")).toBeVisible({ timeout: 15_000 });
+    try {
+      await expect(host.locator(".room-code-copy span")).toBeVisible({ timeout: 15_000 });
+    } catch (error) {
+      console.log("Capture restart diagnostic", await host.evaluate(() => (window as any).__testCaptureStages));
+      throw error;
+    }
     const newCode = (await host.locator(".room-code-copy span").textContent())!.trim();
     expect(newCode).not.toBe(code);
     await join(second, "Amigo B", newCode);

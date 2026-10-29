@@ -6,6 +6,7 @@ import { joinRoom as joinTorrentRoom } from "@trystero-p2p/torrent";
 import { FriendsSession, type FriendMember, type FriendsSnapshot } from "./friends-session";
 import { cleanName, createSavedRoom, forgetRoom, loadLocalIdentity, loadSavedRooms, parseRoomInvite, roomInvite, saveRoom, type SavedRoom } from "./saved-rooms";
 import { QUALITY_PRESETS, type CaptureScreen, type QualityKey } from "./screen-media";
+import { connectionReport, getTransportConfig, resetConnectionDiagnostics } from "./connection-diagnostics";
 import "./friends.css";
 
 let pendingRoomLeave: Promise<void> = Promise.resolve();
@@ -68,6 +69,7 @@ export default function FriendsHub({ platform, capture, stopAudio, onBack, captu
   const [focus, setFocus] = useState("");
   const [volumes, setVolumes] = useState<Record<string, number>>({});
   const [copied, setCopied] = useState(false);
+  const [diagnosticCopied, setDiagnosticCopied] = useState(false);
   const [picker, setPicker] = useState(false);
   const [sources, setSources] = useState<CaptureSource[]>([]);
   const [sourceId, setSourceId] = useState("");
@@ -127,12 +129,14 @@ export default function FriendsHub({ platform, capture, stopAudio, onBack, captu
       await leave();
       const epoch = ++operation.current;
       if (!mounted.current) return;
-      const config = { appId: "com.gregpreto.infinity.friends.v1", password: room.secret, turnConfig: [] };
+      resetConnectionDiagnostics(); setDiagnosticCopied(false);
+      // Trystero 0.26 changed its action wire format; old clients must use a separate namespace.
+      const config = { appId: "com.gregpreto.infinity.friends.v2", password: room.secret };
       const routes: Room[] = [];
       let controller: FriendsSession | undefined;
       const strategies = new Map<Room, { name: string; join: typeof joinNostrRoom }>();
       const createRoute = (strategy: string, join: typeof joinNostrRoom): Room => {
-        const route = join(config, room.id, { onJoinError: (details) => {
+        const route = join({ ...config, ...getTransportConfig(strategy) }, room.id, { onJoinError: (details) => {
           if (mounted.current && operation.current === epoch) controller?.reportRouteFailure(route, details.error, details.peerId, strategy);
         } });
         strategies.set(route, { name: strategy, join });
@@ -271,8 +275,21 @@ export default function FriendsHub({ platform, capture, stopAudio, onBack, captu
         </div> : <>
           <header className="friends-room-heading">
             <div><span className="eyebrow"><i className="status-dot" /> Sala privada</span><h1>{active.name}</h1><p>{online.length + 1} {online.length ? "pessoas conectadas" : "pessoa conectada"} · {online.filter((member) => member.streamId).length + Number(sharing)} telas ao vivo</p></div>
-            <div className="friends-room-actions"><button className="button button-secondary" onClick={() => void copyInvite()} aria-label="Copiar convite">{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? "Copiado" : "Convidar amigos"}</button><button className="icon-button" disabled={busy} aria-label="Sair da sala" title="Sair da sala" onClick={() => void leave()}><ArrowLeft size={18} /></button></div>
+            <div className="friends-room-actions">
+              <button className="icon-button" aria-label="Atualizar conexões" title="Atualizar conexões" onClick={() => void session.current?.retryConnections(true)}><RefreshCw size={17} /></button>
+              <button className="button button-secondary" onClick={() => void (async () => {
+                const epoch = operation.current;
+                try {
+                  const version = await window.telaDesktop.getVersion();
+                  const ok = await window.telaDesktop.copyText(connectionReport(version, platform, online.length + 1));
+                  if (!ok) throw new Error("Não foi possível copiar o diagnóstico.");
+                  if (mounted.current && operation.current === epoch) setDiagnosticCopied(true);
+                } catch (copyError) { if (mounted.current && operation.current === epoch) setError(message(copyError)); }
+              })()} aria-label="Copiar diagnóstico de conexão">{diagnosticCopied ? <Check size={15} /> : <Copy size={15} />}{diagnosticCopied ? "Diagnóstico copiado" : "Diagnóstico"}</button>
+              <button className="button button-secondary" onClick={() => void copyInvite()} aria-label="Copiar convite">{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? "Copiado" : "Convidar amigos"}</button><button className="icon-button" disabled={busy} aria-label="Sair da sala" title="Sair da sala" onClick={() => void leave()}><ArrowLeft size={18} /></button>
+            </div>
           </header>
+          <p className="friends-version-note">Todos da sala precisam atualizar para o Infinity 0.11.0. O convite continua o mesmo.</p>
           <div className="friends-stage-toolbar">
             <span><Eye size={15} /> {selected.length}/4 telas abertas</span>
             <div><button className={layout === "mosaic" ? "selected" : ""} aria-pressed={layout === "mosaic"} onClick={() => setLayout("mosaic")}><Grid2X2 size={15} /> Mosaico</button><button className={layout === "focus" ? "selected" : ""} aria-pressed={layout === "focus"} onClick={() => setLayout("focus")}><Expand size={15} /> Foco</button><button aria-label="Tela cheia" onClick={() => void stage.current?.requestFullscreen().catch(() => setError("Não foi possível abrir a tela cheia."))}><Expand size={16} /></button></div>
